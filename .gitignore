@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Secrets
+.env
+
+# Virtualenv
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Data artifacts (don't commit generated datasets)
+data/raw/
+data/interim/
+data/processed/
+*.db
+
+# HTTP achce (requests-cache)
+data/**/http_cache*
