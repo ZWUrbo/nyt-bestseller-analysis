@@ -10,16 +10,19 @@ from src.ingest.http import HttpClient
 from src.ingest.nyt import NytClient, NytConfig
 from src.ingest.repo import Repo
 
+
 logger = get_logger("fetch_nyt")
 
-def parse_arg() -> argparse.Namespace:
+
+def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--start", type=str, default=None, help="Start date YYYY-MM-DD (default: Jan 1 of START_YEAR)")
     p.add_argument("--end", type=str, default=None, help="End date YYYY-MM-DD (default: Dec 31 of END_YEAR)")
     return p.parse_args()
 
+
 def main() -> None:
-    args = parse_arg()
+    args = parse_args()
     settings.ensure_dirs()
 
     start = date.fromisoformat(args.start) if args.start else date(settings.start_year, 1, 1)
@@ -32,7 +35,7 @@ def main() -> None:
     repo = Repo(conn)
     repo.init_schema()
 
-    logger.info("NYT ingestion uses the overview enpoint (top 5 books per list per week).")
+    logger.info("NYT ingestion uses the overview endpoint (top 5 books per list per week).")
 
     total = 0
     for d in NytClient.iter_weekly_dates(start, end):
@@ -42,11 +45,12 @@ def main() -> None:
             n = repo.upsert_nyt_entries(entries)
             total += n
             logger.info(f"{ds}: upserted {n} NYT entries")
-        except Exception as e:
-            logger.error(f"{ds}: failed ({type(e).__name__}) {e}")
-    
+        except Exception:
+            logger.exception(f"{ds}: failed")
+
     logger.info(f"Done. Total NYT upserts: {total}")
     conn.close()
 
-    if __name__ == "__main__":
-        main()
+
+if __name__ == "__main__":
+    main()

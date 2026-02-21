@@ -106,16 +106,16 @@ class Repo:
             rank=excluded.rank,
             weeks_on_list=excluded.weeks_on_list,
             publisher=excluded.publisher,
-            isbn13=COALESCE(exluded.isbn13, nyt_entries.isbn13),
-            isbn10=COALESCE(exluded.isbn10, nyt_entries.isbn10
-            description=COALESCE(exluded.description, nyt_entries.description)       
+            isbn13=COALESCE(excluded.isbn13, nyt_entries.isbn13),
+            isbn10=COALESCE(excluded.isbn10, nyt_entries.isbn10),
+            description=COALESCE(excluded.description, nyt_entries.description)       
         """
         cur = self.conn.cursor()
         count = 0
         for e in entries:
             cur.execute(
                 sql,
-                    (
+                (
                     e.list_name,
                     e.published_date,
                     e.rank,
@@ -126,7 +126,7 @@ class Repo:
                     e.isbn13,
                     e.isbn10,
                     e.description
-                    ),
+                ),
             )
             count += 1
         self.conn.commit()

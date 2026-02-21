@@ -37,7 +37,7 @@ class NytClient:
             params={"api-key": self.cfg.api_key, "published_date": published_date},
         )
 
-        results = Dict[str, Any] = data.get("results") or {}
+        results: Dict[str, Any] = data.get("results") or {}
         # Some responses include a top-level published_date in results, fall bavck to requested date.
         resolved_published_date = results.get("published_date") or published_date
 
@@ -47,7 +47,7 @@ class NytClient:
         for lst in lists:
             list_name = (lst.get("list_name") or "").strip()
             # "books" should be a list of dicts for top books in that list
-            books = list.get("books") or []
+            books = lst.get("books") or []
             for book in books:
                 #NYT typically uses these keys in overview books.
                 title = (book.get("title") or "").strip()
@@ -71,13 +71,13 @@ class NytClient:
             # Filter out any weird empty list names/titles
             return [e for e in entries if e.title.strip() and e.list_name.strip()]
     
-@staticmethod
-def iter_weekly_dates(start: date, end: date) -> Iterable[date]:
-    """
-    NYTlists are weekly. We'll step by 7 days.
-    """
-    d = start
-    while d <= end:
-        yield d
-        d += timedelta(days=7)
+    @staticmethod
+    def iter_weekly_dates(start: date, end: date) -> Iterable[date]:
+        """
+        NYTlists are weekly. We'll step by 7 days.
+        """
+        d = start
+        while d <= end:
+            yield d
+            d += timedelta(days=7)
 
