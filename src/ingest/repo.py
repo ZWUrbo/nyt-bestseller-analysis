@@ -55,7 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_awards_title ON awards(title);
 """
 
 @dataclass (frozen=True)
-class NYTEntry:
+class NytEntry:
     list_name: str
     published_date: str
     rank: Optional[int]
@@ -97,7 +97,7 @@ class Repo:
         self.conn.executescript(SCHEMA_SQL)
         self.conn.commit()
     
-    def insert_nyt_entries(self, entries: Iterable[NYTEntry]) -> int:
+    def insert_nyt_entries(self, entries: Iterable[NytEntry]) -> int:
         sql = """
         INSERT INTO nyt_entries
         (list_name, published_date, rank, weeks_on_list, title, author, publisher, isbn13, isbn10, description)
@@ -132,7 +132,7 @@ class Repo:
         self.conn.commit()
         return count
     
-    def upsert_books(self, books: Iterable(OpenLibraryBook)) -> int:
+    def upsert_books(self, books: Iterable[OpenLibraryBook]) -> int:
         sql = """
         INSERT INTO books
         (key, title, author_names, first_publish_year, language_codes, isbn13, isbn10, subjects, description, last_enriched_at)

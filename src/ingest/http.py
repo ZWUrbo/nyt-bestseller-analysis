@@ -13,7 +13,7 @@ class HttpError(RuntimeError):
 
 
 @dataclass
-class RateLImiter:
+class RateLimiter:
     rps: float
     _last_ts: float = 0.0
 
@@ -28,15 +28,16 @@ class RateLImiter:
         self._last_ts = time.time()
 
 class HttpClient:
-    def __init__(self, cache_path: str, expire_seconds: int) -> None:
+    def __init__(self, cache_path: str, expire_seconds: int, contact_email: str = "") -> None:
         self.session = requests_cache.CachedSession(
             cache_name=cache_path,
             backend="sqlite",
             expire_after=expire_seconds,
         )
-        self.session.headers.update(
-            {"User-Agent": "book-success-analysis/1.0 (research; contact: you@example.com)"}
-        )
+        ua = "book-success-analysis/1.0 (research)"
+        if contact_email:
+            ua += f" contact:{contact_email}"
+        self.session.headers.update({"User-Agent": ua})
     
     @retry(
         reraise=True,

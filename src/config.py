@@ -29,6 +29,9 @@ class Settings(BaseModel):
     start_year: int = Field(default_factory=lambda: int(os.getenv("START_YEAR", "2021")))
     end_year: int = Field(default_factory=lambda: int(os.getenv("END_YEAR", "2024")))
 
+    # Email
+    contact_email: str = Field(default_factory=lambda: os.getenv("CONTACT_EMAIL",""))
+
     def ensure_dirs(self) -> None:
         (self.data_dir / "raw").mkdir(parents=True, exist_ok=True)
         (self.data_dir / "interim").mkdir(parents=True, exist_ok=True)
