@@ -36,7 +36,7 @@ def main() -> None:
     for d in NytClient.iter_weekly_dates(start, end):
         ds = d.isoformat()
         try:
-            entries = nyt.festch_lists_for_date(ds)
+            entries = nyt.fetch_lists_for_date(ds)
             n = repo.upsert_nyt_entries(entries)
             total += n
             logger.info(f"{ds}: upserted {n} NYT entries")

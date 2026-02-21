@@ -97,7 +97,7 @@ class Repo:
         self.conn.executescript(SCHEMA_SQL)
         self.conn.commit()
     
-    def insert_nyt_entries(self, entries: Iterable[NytEntry]) -> int:
+    def upsert_nyt_entries(self, entries: Iterable[NytEntry]) -> int:
         sql = """
         INSERT INTO nyt_entries
         (list_name, published_date, rank, weeks_on_list, title, author, publisher, isbn13, isbn10, description)
