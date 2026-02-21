@@ -32,6 +32,8 @@ def main() -> None:
     repo = Repo(conn)
     repo.init_schema()
 
+    logger.info("NYT ingestion uses the overview enpoint (top 5 books per list per week).")
+
     total = 0
     for d in NytClient.iter_weekly_dates(start, end):
         ds = d.isoformat()
