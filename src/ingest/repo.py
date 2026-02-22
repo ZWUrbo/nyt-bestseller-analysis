@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Optional, Sequence, Dict, Any
+from typing import Iterable, Optional, Sequence
 import sqlite3
 from datetime import datetime, timezone
 
@@ -22,20 +22,6 @@ CREATE TABLE IF NOT EXISTS nyt_entries (
     UNIQUE(list_name, published_date, title, author)
 );
 
-CREATE TABLE IF NOT EXISTS books (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key TEXT UNIQUE, -- Open Library work key like /works/OLxxxxW
-    title TEXT,
-    author_names TEXT, -- pipe-separated
-    first_publish_year INTEGER,
-    language_codes TEXT, -- pipe-separated
-    isbn13 TEXT, -- pipe-separated
-    isbn10 TEXT, -- pipe-separated
-    subjects TEXT, -- pipe-separated
-    description TEXT, -- normalized text
-    last_enriched_at TEXT
-);
-
 CREATE TABLE IF NOT EXISTS awards (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     award_name TEXT NOT NULL,
@@ -49,9 +35,19 @@ CREATE TABLE IF NOT EXISTS awards (
     UNIQUE(award_name, year, category, title, author)
 );
 
+CREATE TABLE IF NOT EXISTS openlibrary_enrichment (
+    isbn13 TEXT PRIMARY KEY,
+    work_key TEXT,
+    subjects TEXT, -- pipe-separated
+    subject_places TEXT, -- pipe-separated
+    description TEXT, -- normalized text
+    last_error TEXT,
+    last_checked_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_nyt_isbn13 ON nyt_entries(isbn13);
-CREATE INDEX IF NOT EXISTS idx_books_isbn13 ON books(isbn13);
 CREATE INDEX IF NOT EXISTS idx_awards_title ON awards(title);
+CREATE INDEX IF NOT EXISTS idx_openlibrary_enrichment_work_key ON openlibrary_enrichment(work_key);
 """
 
 @dataclass (frozen=True)
@@ -68,16 +64,13 @@ class NytEntry:
     description: Optional[str]
 
 @dataclass(frozen=True)
-class OpenLibraryBook:
-    key: str
-    title: Optional[str]
-    author_names: Sequence[str]
-    first_publish_year: Optional[int]
-    language_codes: Sequence[str]
-    isbn13: Sequence[str]
-    isbn10: Sequence[str]
+class OpenLibraryEnrichmentRow:
+    isbn13: str
+    work_key: Optional[str]
     subjects: Sequence[str]
+    subject_places: Sequence[str]
     description: Optional[str]
+    last_error: Optional[str]
 
 @dataclass(frozen=True)
 class AwardRow:
@@ -132,45 +125,6 @@ class Repo:
         self.conn.commit()
         return count
     
-    def upsert_books(self, books: Iterable[OpenLibraryBook]) -> int:
-        sql = """
-        INSERT INTO books
-        (key, title, author_names, first_publish_year, language_codes, isbn13, isbn10, subjects, description, last_enriched_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET
-            title=COALESCE(excluded.title, books.title),
-            author_names=COALESCE(excluded.author_names, books.author_names),
-            first_publish_year=COALESCE(excluded.first_publish_year, books.first_publish_year),
-            language_codes=COALESCE(excluded.language_codes, books.language_codes),
-            isbn13=COALESCE(excluded.isbn13, books.isbn13),
-            isbn10=COALESCE(excluded.isbn10, books.isbn10),
-            subjects=COALESCE(excluded.subjects, books.subjects),
-            description=COALESCE(excluded.description, books.description),
-            last_enriched_at=excluded.last_enriched_at
-        """
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        cur = self.conn.cursor()
-        count = 0
-        for b in books:
-            cur.execute(
-                sql,
-                (
-                    b.key,
-                    b.title,
-                    "|".join([x for x in b.author_names if x]),
-                    b.first_publish_year,
-                    "|".join([x for x in b.language_codes if x]),
-                    "|".join([x for x in b.isbn13 if x]),
-                    "|".join([x for x in b.isbn10 if x]),
-                    "|".join([x for x in b.subjects if x]),
-                    b.description,
-                    now
-                ),
-            )
-            count += 1
-        self.conn.commit()
-        return count
-    
     def upsert_awards(self, rows: Iterable[AwardRow]) -> int:
         sql = """
         INSERT INTO awards (award_name, year, category, outcome, title, author, source)
@@ -191,6 +145,53 @@ class Repo:
                     r.title,
                     r.author,
                     r.source
+                ),
+            )
+            count += 1
+        self.conn.commit()
+        return count
+
+    def list_nyt_isbn13(self, limit: int = 500, missing_only: bool = True) -> list[str]:
+        sql = """
+        SELECT DISTINCT n.isbn13
+        FROM nyt_entries n
+        LEFT JOIN openlibrary_enrichment e ON e.isbn13 = n.isbn13
+        WHERE n.isbn13 IS NOT NULL
+          AND TRIM(n.isbn13) <> ''
+          AND (? = 0 OR e.isbn13 IS NULL)
+        ORDER BY n.isbn13
+        LIMIT ?
+        """
+        cur = self.conn.execute(sql, (1 if missing_only else 0, limit))
+        return [row[0] for row in cur.fetchall() if row[0]]
+
+    def upsert_openlibrary_enrichment(self, rows: Iterable[OpenLibraryEnrichmentRow]) -> int:
+        sql = """
+        INSERT INTO openlibrary_enrichment
+        (isbn13, work_key, subjects, subject_places, description, last_error, last_checked_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(isbn13) DO UPDATE SET
+            work_key=COALESCE(excluded.work_key, openlibrary_enrichment.work_key),
+            subjects=COALESCE(excluded.subjects, openlibrary_enrichment.subjects),
+            subject_places=COALESCE(excluded.subject_places, openlibrary_enrichment.subject_places),
+            description=COALESCE(excluded.description, openlibrary_enrichment.description),
+            last_error=excluded.last_error,
+            last_checked_at=excluded.last_checked_at
+        """
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        cur = self.conn.cursor()
+        count = 0
+        for r in rows:
+            cur.execute(
+                sql,
+                (
+                    r.isbn13,
+                    r.work_key,
+                    "|".join([x for x in r.subjects if x]),
+                    "|".join([x for x in r.subject_places if x]),
+                    r.description,
+                    r.last_error,
+                    now,
                 ),
             )
             count += 1
