@@ -17,5 +17,5 @@ def get_logger(name: str= "literary_analysis") -> logging.Logger:
     )
     handler.setFormatter(fmt)
     logger.addHandler(handler)
-    logger.propagate
+    logger.propagate = False
     return logger
