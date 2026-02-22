@@ -7,7 +7,7 @@ name = "literary-analysis"
 version = "0.1.0"
 requires-python = ">=3.10"
 
-[tools.setuptools]
+[tool.setuptools]
 package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
