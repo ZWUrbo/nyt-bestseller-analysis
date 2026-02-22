@@ -10,6 +10,8 @@
 # Python
 __pycache__/
 *.pyc
+*.egg-info/
+.ipynb_checkpoints/
 
 # Data artifacts (don't commit generated datasets)
 data/raw/
@@ -17,5 +19,9 @@ data/interim/
 data/processed/
 *.db
 
-# HTTP achce (requests-cache)
+# Notebook-local generated data
+notebooks/data/
+
+# HTTP cache (requests-cache)
 data/**/http_cache*
+notebooks/**/http_cache*
