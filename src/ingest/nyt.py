@@ -69,7 +69,7 @@ class NytClient:
                     )
                 )
             # Filter out any weird empty list names/titles
-            return [e for e in entries if e.title.strip() and e.list_name.strip()]
+        return [e for e in entries if e.title.strip() and e.list_name.strip()]
     
     @staticmethod
     def iter_weekly_dates(start: date, end: date) -> Iterable[date]:
