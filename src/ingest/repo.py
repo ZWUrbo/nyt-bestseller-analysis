@@ -22,19 +22,6 @@ CREATE TABLE IF NOT EXISTS nyt_entries (
     UNIQUE(list_name, published_date, title, author)
 );
 
-CREATE TABLE IF NOT EXISTS awards (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    award_name TEXT NOT NULL,
-    year INTEGER NOT NULL,
-    category TEXT,
-    outcome TEXT NOT NULL, -- nominee or winner
-    title TEXT NOT NULL,
-    author TEXT,
-    source TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(award_name, year, category, title, author)
-);
-
 CREATE TABLE IF NOT EXISTS openlibrary_enrichment (
     isbn13 TEXT PRIMARY KEY,
     work_key TEXT,
@@ -46,7 +33,6 @@ CREATE TABLE IF NOT EXISTS openlibrary_enrichment (
 );
 
 CREATE INDEX IF NOT EXISTS idx_nyt_isbn13 ON nyt_entries(isbn13);
-CREATE INDEX IF NOT EXISTS idx_awards_title ON awards(title);
 CREATE INDEX IF NOT EXISTS idx_openlibrary_enrichment_work_key ON openlibrary_enrichment(work_key);
 """
 
@@ -71,16 +57,6 @@ class OpenLibraryEnrichmentRow:
     subject_places: Sequence[str]
     description: Optional[str]
     last_error: Optional[str]
-
-@dataclass(frozen=True)
-class AwardRow:
-    award_name: str
-    year: int
-    category: Optional[str]
-    outcome: str # nominee/winner
-    title: str
-    author: Optional[str]
-    source: Optional[str]
 
 class Repo:
     def __init__(self, conn: sqlite3.Connection) -> None:
@@ -125,32 +101,6 @@ class Repo:
         self.conn.commit()
         return count
     
-    def upsert_awards(self, rows: Iterable[AwardRow]) -> int:
-        sql = """
-        INSERT INTO awards (award_name, year, category, outcome, title, author, source)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(award_name, year, category, title, author) DO UPDATE SET
-            source=COALESCE(excluded.source, awards.source);
-        """
-        cur = self.conn.cursor()
-        count = 0   
-        for r in rows:
-            cur.execute(
-                sql,
-                (
-                    r.award_name,
-                    r.year,
-                    r.category,
-                    r.outcome,
-                    r.title,
-                    r.author,
-                    r.source
-                ),
-            )
-            count += 1
-        self.conn.commit()
-        return count
-
     def list_nyt_isbn13(self, limit: int = 500, missing_only: bool = True) -> list[str]:
         sql = """
         SELECT DISTINCT n.isbn13
