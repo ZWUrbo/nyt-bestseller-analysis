@@ -19,9 +19,6 @@ data/interim/
 data/processed/
 *.db
 
-# Notebook-local generated data
-notebooks/data/
-
 # HTTP cache (requests-cache)
 data/**/http_cache*
-notebooks/**/http_cache*
+
