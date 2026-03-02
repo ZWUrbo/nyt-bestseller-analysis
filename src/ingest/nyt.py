@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Any, Iterable, List, Optional, Sequence
 from datetime import date, timedelta
+import re
 
 from src.ingest.http import HttpClient, RateLimiter
 from src.ingest.repo import NytEntry
@@ -10,6 +11,24 @@ from src.ingest.repo import NytEntry
 # NYT Books API: overview returns top 5 books for all lists; accepts published_date query param.
 # Spec: /svc/books/v3/lists/overview.json?published_date=YYYY-MM-DD :contentReference[oaicite:2]{index=2}
 NYT_LISTS_ENDPOINT = "https://api.nytimes.com/svc/books/v3/lists/overview.json"
+
+NYT_ALLOWED_LISTS = {
+    "advice how to miscellaneous",
+    "combined print e book fiction",
+    "combined print e book nonfiction",
+    "mass market",
+    "audio fiction",
+    "audio nonfiction",
+    "young adult hardcover",
+    "young adult paperback",
+}
+
+
+def _normalize_list_name(value: str) -> str:
+    lowered = value.lower()
+    lowered = lowered.replace("&", " ")
+    lowered = re.sub(r"[^a-z0-9]+", " ", lowered)
+    return " ".join(lowered.split())
 
 @dataclass(frozen=True)
 class NytConfig:
@@ -46,6 +65,8 @@ class NytClient:
 
         for lst in lists:
             list_name = (lst.get("list_name") or "").strip()
+            if _normalize_list_name(list_name) not in NYT_ALLOWED_LISTS:
+                continue
             # "books" should be a list of dicts for top books in that list
             books = lst.get("books") or []
             for book in books:
@@ -80,4 +101,3 @@ class NytClient:
         while d <= end:
             yield d
             d += timedelta(days=7)
-
