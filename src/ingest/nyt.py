@@ -17,8 +17,6 @@ NYT_ALLOWED_LISTS = {
     "combined print e book fiction",
     "combined print e book nonfiction",
     "mass market",
-    "audio fiction",
-    "audio nonfiction",
     "young adult hardcover",
     "young adult paperback",
 }
