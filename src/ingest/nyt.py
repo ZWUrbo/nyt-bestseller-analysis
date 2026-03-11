@@ -48,7 +48,7 @@ class NytClient:
         """
         Fetch NYT Best Sellers overview for a specific published_date (YYYY-MM-DD).
 
-        NOTE: The overview endpoint returns the TOP 5 books for each list(not the full list)
+        NOTE: The overview endpoint returns the TOP 15 books for each list(not the full list)
         """
         self.limiter.wait()
         data = self.http.get_json(
