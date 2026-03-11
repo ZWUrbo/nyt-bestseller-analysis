@@ -85,7 +85,6 @@ class NytClient:
                         author = book.get("author"),
                         publisher = book.get("publisher"),
                         isbn13 = book.get("primary_isbn13"),
-                        isbn10 = book.get("primary_isbn10"),
                         description = book.get("description")
                     )
                 )

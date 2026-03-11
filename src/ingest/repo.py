@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS nyt_entries (
     author TEXT,
     publisher TEXT,
     isbn13 TEXT,
-    isbn10 TEXT,
     description TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(list_name, published_date, title, author)
@@ -33,7 +32,7 @@ CREATE TABLE IF NOT EXISTS openlibrary_enrichment (
 );
 
 CREATE INDEX IF NOT EXISTS idx_nyt_isbn13 ON nyt_entries(isbn13);
-CREATE INDEX IF NOT EXISTS idx_openlibrary_enrichment_work_key ON openlibrary_enrichment(work_key);
+CREATE INDEX IF NOT EXISTS idx_openlibrary_enrimchment_isbn13 ON openlibrary_enrichment(isbn13);
 """
 
 @dataclass (frozen=True)
@@ -46,7 +45,6 @@ class NytEntry:
     author: Optional[str]
     publisher: Optional[str]
     isbn13: Optional[str]
-    isbn10: Optional[str]
     description: Optional[str]
 
 @dataclass(frozen=True)
@@ -69,14 +67,13 @@ class Repo:
     def upsert_nyt_entries(self, entries: Iterable[NytEntry]) -> int:
         sql = """
         INSERT INTO nyt_entries
-        (list_name, published_date, rank, weeks_on_list, title, author, publisher, isbn13, isbn10, description)
+        (list_name, published_date, rank, weeks_on_list, title, author, publisher, isbn13, description)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(list_name, published_date, title, author) DO UPDATE SET
             rank=excluded.rank,
             weeks_on_list=excluded.weeks_on_list,
             publisher=excluded.publisher,
             isbn13=COALESCE(excluded.isbn13, nyt_entries.isbn13),
-            isbn10=COALESCE(excluded.isbn10, nyt_entries.isbn10),
             description=COALESCE(excluded.description, nyt_entries.description)       
         """
         cur = self.conn.cursor()
@@ -93,7 +90,6 @@ class Repo:
                     e.author,
                     e.publisher,
                     e.isbn13,
-                    e.isbn10,
                     e.description
                 ),
             )
