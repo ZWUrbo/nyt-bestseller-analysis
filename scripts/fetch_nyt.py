@@ -35,9 +35,10 @@ def main() -> None:
     repo = Repo(conn)
     repo.init_schema()
 
-    logger.info("NYT ingestion uses the overview endpoint (top 5 books per list per week).")
+    logger.info("NYT ingestion uses the overview endpoint (top 15 books per list per week).")
 
     total = 0
+    failures = 0
     for d in NytClient.iter_weekly_dates(start, end):
         ds = d.isoformat()
         try:
@@ -46,10 +47,14 @@ def main() -> None:
             total += n
             logger.info(f"{ds}: upserted {n} NYT entries")
         except Exception:
+            failures += 1
             logger.exception(f"{ds}: failed")
 
-    logger.info(f"Done. Total NYT upserts: {total}")
+    logger.info(f"Done. Total NYT upserts: {total} | failures: {failures}")
     conn.close()
+
+    if failures:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -68,7 +68,7 @@ class Repo:
         sql = """
         INSERT INTO nyt_entries
         (list_name, published_date, rank, weeks_on_list, title, author, publisher, isbn13, description)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(list_name, published_date, title, author) DO UPDATE SET
             rank=excluded.rank,
             weeks_on_list=excluded.weeks_on_list,
