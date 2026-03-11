@@ -22,3 +22,5 @@ data/processed/
 # HTTP cache (requests-cache)
 data/**/http_cache*
 
+# Notebooks
+notebooks/data_audit.ipynb
