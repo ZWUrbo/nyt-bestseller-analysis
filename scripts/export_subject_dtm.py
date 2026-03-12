@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=settings.data_dir / "processed" / "isbn13_subject_dtm.csv",
+        default=settings.data_dir / "processed" / "features" / "isbn13_subject_dtm.csv",
         help="Destination CSV path.",
     )
     parser.add_argument(
