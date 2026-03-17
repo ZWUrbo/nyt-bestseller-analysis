@@ -11,6 +11,17 @@ from src.config import settings
 from src.utils.io import connect_sqlite
 
 WHITESPACE_RE = re.compile(r"\s+")
+HIERARCHY_SPLIT_RE = re.compile(r"\s*(?:,|/|&|--)\s*")
+EXCLUDED_TERMS = {
+    "fiction",
+    "young adult",
+    "new york times bestseller",
+}
+EXCLUDED_SOURCE_TAG_PREFIXES = (
+    "nyt:",
+    "series:",
+    "collectionid:",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,11 +61,11 @@ def normalize_term(term: str) -> str:
 def should_keep_term(term: str, keep_source_tags: bool) -> bool:
     if not term:
         return False
+    if term in EXCLUDED_TERMS:
+        return False
     if keep_source_tags:
         return True
-    if term.startswith("nyt:"):
-        return False
-    if term == "new york times bestseller":
+    if term.startswith(EXCLUDED_SOURCE_TAG_PREFIXES):
         return False
     return True
 
@@ -65,19 +76,27 @@ def split_terms(raw_value: str | None) -> list[str]:
     return [part for part in raw_value.split("|") if part and part.strip()]
 
 
+def expand_terms(raw_term: str) -> list[str]:
+    return [
+        term
+        for part in HIERARCHY_SPLIT_RE.split(raw_term)
+        if (term := normalize_term(part))
+    ]
+
+
 def iter_term_rows(frame: pd.DataFrame, keep_source_tags: bool) -> Iterable[dict[str, str]]:
     for row in frame.itertuples(index=False):
         seen_terms: set[str] = set()
 
         for raw_term in split_terms(row.subjects):
-            term = normalize_term(raw_term)
-            if should_keep_term(term, keep_source_tags):
-                seen_terms.add(f"subject:{term}")
+            for term in expand_terms(raw_term):
+                if should_keep_term(term, keep_source_tags):
+                    seen_terms.add(term)
 
         for raw_term in split_terms(row.subject_places):
-            term = normalize_term(raw_term)
-            if should_keep_term(term, keep_source_tags):
-                seen_terms.add(f"subject_place:{term}")
+            for term in expand_terms(raw_term):
+                if should_keep_term(term, keep_source_tags):
+                    seen_terms.add(term)
 
         for term in seen_terms:
             yield {"isbn13": row.isbn13, "term": term, "value": 1}
