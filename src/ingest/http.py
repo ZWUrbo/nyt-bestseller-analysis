@@ -72,3 +72,30 @@ class HttpClient:
         if resp.status_code >= 400:
             raise HttpError(f"Client error (HTTP {resp.status_code}): {resp.text[:300]}")
         return resp.json()
+
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=0.8, min=1, max=20),
+        retry=retry_if_exception_type((requests.RequestException, HttpError)),
+    )
+    def post_json(
+        self,
+        url: str,
+        json_body: Dict[str, Any],
+        headers: Optional[Dict[str, str]] = None,
+        timeout: int = 30,
+    ) -> Dict[str, Any]:
+        resp = self.session.post(url, json=json_body, headers=headers, timeout=timeout)
+        if resp.status_code == 429:
+            raise HttpError("Rate limited (HTTP 429)")
+        if resp.status_code >= 500:
+            raise HttpError(f"Server error (HTTP {resp.status_code})")
+        if resp.status_code >= 400:
+            raise HttpError(f"Client error (HTTP {resp.status_code}): {resp.text[:300]}")
+
+        payload = resp.json()
+        errors = payload.get("errors")
+        if isinstance(errors, list) and errors:
+            raise HttpError(f"GraphQL error: {errors[0]}")
+        return payload

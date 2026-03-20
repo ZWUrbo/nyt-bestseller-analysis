@@ -31,8 +31,22 @@ CREATE TABLE IF NOT EXISTS openlibrary_enrichment (
     last_checked_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS hardcover_enrichment (
+    isbn13 TEXT PRIMARY KEY,
+    book_id INTEGER,
+    title TEXT,
+    description TEXT,
+    rating REAL,
+    ratings_count INTEGER,
+    users_read_count INTEGER,
+    cached_tags TEXT, -- serialized JSON
+    last_error TEXT,
+    last_checked_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_nyt_isbn13 ON nyt_entries(isbn13);
 CREATE INDEX IF NOT EXISTS idx_openlibrary_enrimchment_isbn13 ON openlibrary_enrichment(isbn13);
+CREATE INDEX IF NOT EXISTS idx_hardcover_enrichment_isbn13 ON hardcover_enrichment(isbn13);
 """
 
 @dataclass (frozen=True)
@@ -54,6 +68,18 @@ class OpenLibraryEnrichmentRow:
     subjects: Sequence[str]
     subject_places: Sequence[str]
     description: Optional[str]
+    last_error: Optional[str]
+
+@dataclass(frozen=True)
+class HardcoverEnrichmentRow:
+    isbn13: str
+    book_id: Optional[int]
+    title: Optional[str]
+    description: Optional[str]
+    rating: Optional[float]
+    ratings_count: Optional[int]
+    users_read_count: Optional[int]
+    cached_tags: Optional[str]
     last_error: Optional[str]
 
 class Repo:
@@ -97,17 +123,26 @@ class Repo:
         self.conn.commit()
         return count
     
-    def list_nyt_isbn13(self, limit: int = 500, missing_only: bool = True) -> list[str]:
+    def list_nyt_isbn13(
+        self,
+        limit: int = 500,
+        missing_only: bool = True,
+        enrichment_table: str = "openlibrary_enrichment",
+    ) -> list[str]:
+        if enrichment_table not in {"openlibrary_enrichment", "hardcover_enrichment"}:
+            raise ValueError(f"Unsupported enrichment table: {enrichment_table}")
+
         sql = """
         SELECT DISTINCT n.isbn13
         FROM nyt_entries n
-        LEFT JOIN openlibrary_enrichment e ON e.isbn13 = n.isbn13
+        LEFT JOIN {enrichment_table} e ON e.isbn13 = n.isbn13
         WHERE n.isbn13 IS NOT NULL
           AND TRIM(n.isbn13) <> ''
           AND (? = 0 OR e.isbn13 IS NULL)
         ORDER BY n.isbn13
         LIMIT ?
         """
+        sql = sql.format(enrichment_table=enrichment_table)
         cur = self.conn.execute(sql, (1 if missing_only else 0, limit))
         return [row[0] for row in cur.fetchall() if row[0]]
 
@@ -136,6 +171,45 @@ class Repo:
                     "|".join([x for x in r.subjects if x]),
                     "|".join([x for x in r.subject_places if x]),
                     r.description,
+                    r.last_error,
+                    now,
+                ),
+            )
+            count += 1
+        self.conn.commit()
+        return count
+
+    def upsert_hardcover_enrichment(self, rows: Iterable[HardcoverEnrichmentRow]) -> int:
+        sql = """
+        INSERT INTO hardcover_enrichment
+        (isbn13, book_id, title, description, rating, ratings_count, users_read_count, cached_tags, last_error, last_checked_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(isbn13) DO UPDATE SET
+            book_id=COALESCE(excluded.book_id, hardcover_enrichment.book_id),
+            title=COALESCE(excluded.title, hardcover_enrichment.title),
+            description=COALESCE(excluded.description, hardcover_enrichment.description),
+            rating=COALESCE(excluded.rating, hardcover_enrichment.rating),
+            ratings_count=COALESCE(excluded.ratings_count, hardcover_enrichment.ratings_count),
+            users_read_count=COALESCE(excluded.users_read_count, hardcover_enrichment.users_read_count),
+            cached_tags=COALESCE(excluded.cached_tags, hardcover_enrichment.cached_tags),
+            last_error=excluded.last_error,
+            last_checked_at=excluded.last_checked_at
+        """
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        cur = self.conn.cursor()
+        count = 0
+        for r in rows:
+            cur.execute(
+                sql,
+                (
+                    r.isbn13,
+                    r.book_id,
+                    r.title,
+                    r.description,
+                    r.rating,
+                    r.ratings_count,
+                    r.users_read_count,
+                    r.cached_tags,
                     r.last_error,
                     now,
                 ),

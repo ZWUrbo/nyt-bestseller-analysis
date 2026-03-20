@@ -16,6 +16,8 @@ class Settings(BaseModel):
 
     # API keys
     nyt_api_key: str = Field(default_factory=lambda: os.getenv("NYT_API_KEY", ""))
+    hardcover_api_token: str = Field(default_factory=lambda: os.getenv("HARDCOVER_API_TOKEN", ""))
+    hardcover_api_url: str = Field(default_factory=lambda: os.getenv("HARDCOVER_API_URL", "https://api.hardcover.app/v1/graphql"))
 
     # HTTP behavior
     http_cache_path: str = Field(default_factory=lambda: os.getenv("HTTP_CACHE_PATH", "data/interim/http_cache"))
@@ -23,14 +25,15 @@ class Settings(BaseModel):
 
     # Rate limits
     nyt_rps: float = Field(default_factory=lambda: float(os.getenv("NYT_RPS", "2.0")))
-    openlibrary_rps: float= Field(default_factory=lambda: float(os.getenv("OPENLIBRARY_RPS", "5.0")))
+    openlibrary_rps: float = Field(default_factory=lambda: float(os.getenv("OPENLIBRARY_RPS", "5.0")))
+    hardcover_rps: float = Field(default_factory=lambda: float(os.getenv("HARDCOVER_RPS", "0.8")))
 
     # Ingestion scope defaults
     start_year: int = Field(default_factory=lambda: int(os.getenv("START_YEAR", "2021")))
     end_year: int = Field(default_factory=lambda: int(os.getenv("END_YEAR", "2024")))
 
     # Email
-    contact_email: str = Field(default_factory=lambda: os.getenv("CONTACT_EMAIL",""))
+    contact_email: str = Field(default_factory=lambda: os.getenv("CONTACT_EMAIL", ""))
 
     def ensure_dirs(self) -> None:
         (self.data_dir / "raw").mkdir(parents=True, exist_ok=True)
