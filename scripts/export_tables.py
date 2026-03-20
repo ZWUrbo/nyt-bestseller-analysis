@@ -8,7 +8,7 @@ import pandas as pd
 from src.config import settings
 from src.utils.io import connect_sqlite
 
-TABLE_NAMES = ("nyt_entries", "openlibrary_enrichment")
+TABLE_NAMES = ("nyt_entries", "openlibrary_enrichment", "hardcover_enrichment")
 
 
 def parse_args() -> argparse.Namespace:
