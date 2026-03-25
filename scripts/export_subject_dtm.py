@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import unicodedata
 from pathlib import Path
 from typing import Iterable
 
@@ -12,7 +13,30 @@ from src.utils.io import connect_sqlite
 
 WHITESPACE_RE = re.compile(r"\s+")
 HIERARCHY_SPLIT_RE = re.compile(r"\s*(?:,|/|&|--)\s*")
+PAREN_CONTENT_RE = re.compile(r"\([^)]*\)")
+NON_ALNUM_RE = re.compile(r"[^a-z0-9'\- ]+")
+YEAR_OR_CODE_RE = re.compile(r"^(?:\d{1,4}(?:-\d{1,4})?|\d[\d .:-]*[a-z]?)$")
+FAST_AUTHORITY_RE = re.compile(r"\b(?:fast|oclc|viaf|lc)\b")
 EXCLUDED_TERMS = {
+    "administration of",
+    "adult",
+    "american fiction",
+    "american literature",
+    "audiobook",
+    "biography",
+    "general",
+    "fiction",
+    "general",
+    "history",
+    "juvenile literature",
+    "large type books",
+    "literature",
+    "new york times reviewed",
+    "nonfiction",
+    "social aspects",
+    "treatment",
+    "women",
+    "women",
     "fiction",
     "young adult",
     "new york times bestseller",
@@ -41,6 +65,12 @@ def parse_args() -> argparse.Namespace:
         help="Destination CSV path.",
     )
     parser.add_argument(
+        "--tableau-output",
+        type=Path,
+        default=settings.data_dir / "processed" / "features" / "isbn13_subject_tableau.csv",
+        help="Destination CSV path for the Tableau-friendly long-format export.",
+    )
+    parser.add_argument(
         "--min-doc-freq",
         type=int,
         default=1,
@@ -55,7 +85,41 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_term(term: str) -> str:
-    return WHITESPACE_RE.sub(" ", term.strip().lower())
+    ascii_term = unicodedata.normalize("NFKD", term).encode("ascii", "ignore").decode("ascii")
+    return WHITESPACE_RE.sub(" ", ascii_term.strip().lower())
+
+
+def clean_subject_term(raw_term: str) -> str | None:
+    term = normalize_term(raw_term)
+    if not term:
+        return None
+    if "http://" in term or "https://" in term or "(uri)" in term:
+        return None
+    if term.startswith("[") or term.endswith("]"):
+        return None
+    if FAST_AUTHORITY_RE.search(term):
+        return None
+
+    term = PAREN_CONTENT_RE.sub("", term)
+    term = NON_ALNUM_RE.sub(" ", term)
+    term = WHITESPACE_RE.sub(" ", term).strip(" -'")
+
+    if not term:
+        return None
+    if YEAR_OR_CODE_RE.fullmatch(term):
+        return None
+    if any(char.isdigit() for char in term):
+        return None
+
+    words = term.split()
+    if len(words) > 4:
+        return None
+    if len(words) == 1 and len(words[0]) <= 2:
+        return None
+    if words and words[-1] in {"and", "for", "in", "of", "the", "to"}:
+        return None
+
+    return term
 
 
 def should_keep_term(term: str, keep_source_tags: bool) -> bool:
@@ -80,7 +144,7 @@ def expand_terms(raw_term: str) -> list[str]:
     return [
         term
         for part in HIERARCHY_SPLIT_RE.split(raw_term)
-        if (term := normalize_term(part))
+        if (term := clean_subject_term(part))
     ]
 
 
@@ -158,6 +222,32 @@ def build_matrix(source_frame: pd.DataFrame, min_doc_freq: int, keep_source_tags
     return matrix.sort_values("isbn13").reset_index(drop=True)
 
 
+def build_tableau_frame(
+    source_frame: pd.DataFrame,
+    min_doc_freq: int,
+    keep_source_tags: bool,
+) -> pd.DataFrame:
+    term_frame = pd.DataFrame.from_records(iter_term_rows(source_frame, keep_source_tags))
+
+    if term_frame.empty:
+        return pd.DataFrame(columns=["isbn13", "subject", "value"])
+
+    if min_doc_freq > 1:
+        doc_freq = term_frame.groupby("term")["isbn13"].nunique()
+        allowed_terms = doc_freq[doc_freq >= min_doc_freq].index
+        term_frame = term_frame[term_frame["term"].isin(allowed_terms)]
+
+    if term_frame.empty:
+        return pd.DataFrame(columns=["isbn13", "subject", "value"])
+
+    return (
+        term_frame.drop_duplicates(subset=["isbn13", "term"])
+        .rename(columns={"term": "subject"})
+        .sort_values(["isbn13", "subject"])
+        .reset_index(drop=True)
+    )
+
+
 def main() -> None:
     args = parse_args()
     settings.ensure_dirs()
@@ -168,13 +258,24 @@ def main() -> None:
         min_doc_freq=max(args.min_doc_freq, 1),
         keep_source_tags=args.keep_source_tags,
     )
+    tableau_frame = build_tableau_frame(
+        source_frame=source_frame,
+        min_doc_freq=max(args.min_doc_freq, 1),
+        keep_source_tags=args.keep_source_tags,
+    )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     matrix.to_csv(args.output, index=False)
+    args.tableau_output.parent.mkdir(parents=True, exist_ok=True)
+    tableau_frame.to_csv(args.tableau_output, index=False)
 
     print(
         f"Exported binary document-term matrix to {args.output} "
         f"(rows={len(matrix)}, columns={len(matrix.columns) - 1})."
+    )
+    print(
+        f"Exported Tableau source to {args.tableau_output} "
+        f"(rows={len(tableau_frame)}, columns={len(tableau_frame.columns)})."
     )
 
 

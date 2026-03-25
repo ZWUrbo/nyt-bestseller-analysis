@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable
@@ -20,6 +21,49 @@ CATEGORY_OUTPUTS = {
     "Genre": "genre",
     "Mood": "mood",
     "Tag": "tag",
+}
+WHITESPACE_RE = re.compile(r"\s+")
+UUID_SUFFIX_RE = re.compile(r"[-_](?:[0-9a-f]{8,}|[0-9]{6,})(?:-[0-9a-f]{4,})*$")
+LEADING_GENRE_PREFIX_RE = re.compile(r"^genre\s+")
+NON_ALNUM_RE = re.compile(r"[^a-z0-9'&\- ]+")
+ONLY_CODE_RE = re.compile(r"^(?:\d{4}|\d{10,}|[0-9a-f]{8,})$")
+GENERIC_TERMS_BY_CATEGORY = {
+    "Genre": {
+        "ability",
+        "adult",
+        "american",
+        "audiobook",
+        "audiobooks on cd",
+        "books and reading",
+        "fiction",
+        "general",
+        "nonfiction",
+        "women",
+    },
+    "Mood": {
+        "contemp",
+    },
+    "Tag": {
+        "amazing",
+        "audio",
+        "audio atlanta",
+        "audio austin",
+        "audible",
+        "audiobook",
+        "audiobookshelf",
+        "bogklub",
+        "bookclub books",
+        "calibre migration",
+        "didn t finish",
+        "ebook",
+        "from audible",
+        "from nas",
+        "general",
+        "history",
+        "kindle unlimited",
+        "libby",
+        "library",
+    },
 }
 
 
@@ -83,6 +127,36 @@ def parse_cached_tags(raw_value: str) -> dict[str, list[dict[str, Any]]]:
     }
 
 
+def normalize_hardcover_term(raw_term: str, category_name: str) -> str | None:
+    term = raw_term.strip().lower()
+    if not term:
+        return None
+
+    term = UUID_SUFFIX_RE.sub("", term)
+    term = term.replace("_", " ").replace("/", " ").replace("-", " ")
+    term = LEADING_GENRE_PREFIX_RE.sub("", term)
+    term = NON_ALNUM_RE.sub(" ", term)
+    term = WHITESPACE_RE.sub(" ", term).strip(" '")
+    term = LEADING_GENRE_PREFIX_RE.sub("", term)
+
+    if not term:
+        return None
+    if ONLY_CODE_RE.fullmatch(term):
+        return None
+    if any(char.isdigit() for char in term):
+        return None
+
+    words = term.split()
+    if len(words) > 4:
+        return None
+    if words and words[-1] in {"and", "for", "in", "of", "the", "to"}:
+        return None
+    if term in GENERIC_TERMS_BY_CATEGORY.get(category_name, set()):
+        return None
+
+    return term
+
+
 def iter_term_rows(source_frame: pd.DataFrame, category_name: str) -> Iterable[dict[str, str | int]]:
     for row in source_frame.itertuples(index=False):
         parsed_tags = parse_cached_tags(row.cached_tags)
@@ -92,9 +166,11 @@ def iter_term_rows(source_frame: pd.DataFrame, category_name: str) -> Iterable[d
         for item in category_items:
             if not isinstance(item, dict):
                 continue
-            tag_slug = item.get("tagSlug")
-            if isinstance(tag_slug, str):
-                cleaned = tag_slug.strip()
+            raw_term = item.get("tag")
+            if not isinstance(raw_term, str) or not raw_term.strip():
+                raw_term = item.get("tagSlug")
+            if isinstance(raw_term, str):
+                cleaned = normalize_hardcover_term(raw_term, category_name)
                 if cleaned:
                     seen_terms.add(cleaned)
 
@@ -138,6 +214,32 @@ def build_matrix(source_frame: pd.DataFrame, category_name: str, min_doc_freq: i
     return matrix.sort_values("isbn13").reset_index(drop=True)
 
 
+def build_tableau_frame(source_frame: pd.DataFrame, category_name: str, min_doc_freq: int) -> pd.DataFrame:
+    term_frame = pd.DataFrame.from_records(iter_term_rows(source_frame, category_name))
+
+    if term_frame.empty:
+        return pd.DataFrame(columns=["isbn13", "term", "value"])
+
+    if min_doc_freq > 1:
+        doc_freq = term_frame.groupby("term")["isbn13"].nunique()
+        allowed_terms = doc_freq[doc_freq >= min_doc_freq].index
+        term_frame = term_frame[term_frame["term"].isin(allowed_terms)]
+
+    if term_frame.empty:
+        return pd.DataFrame(columns=["isbn13", "term", "value"])
+
+    return (
+        term_frame.drop_duplicates(subset=["isbn13", "term"])
+        .rename(columns={"term": output_term_column_name(category_name)})
+        .sort_values(["isbn13", output_term_column_name(category_name)])
+        .reset_index(drop=True)
+    )
+
+
+def output_term_column_name(category_name: str) -> str:
+    return category_name.strip().lower().replace(" ", "_")
+
+
 def main() -> None:
     args = parse_args()
     settings.ensure_dirs()
@@ -157,6 +259,18 @@ def main() -> None:
         print(
             f"Exported {category_name} DTM to {output_path} "
             f"(rows={len(matrix)}, columns={len(matrix.columns) - 1})."
+        )
+
+        tableau_frame = build_tableau_frame(
+            source_frame=source_frame,
+            category_name=category_name,
+            min_doc_freq=min_doc_freq,
+        )
+        tableau_output_path = args.output_dir / f"isbn13_{output_stub}_tableau.csv"
+        tableau_frame.to_csv(tableau_output_path, index=False)
+        print(
+            f"Exported {category_name} Tableau source to {tableau_output_path} "
+            f"(rows={len(tableau_frame)}, columns={len(tableau_frame.columns)})."
         )
 
 
