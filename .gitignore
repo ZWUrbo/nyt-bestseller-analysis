@@ -6,6 +6,7 @@
 
 # Virtualenv
 .venv/
+.venv312/
 
 # Python
 __pycache__/
