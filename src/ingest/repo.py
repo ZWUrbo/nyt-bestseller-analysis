@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS openlibrary_enrichment (
 CREATE TABLE IF NOT EXISTS hardcover_enrichment (
     isbn13 TEXT PRIMARY KEY,
     book_id INTEGER,
+    author_id INTEGER,
     title TEXT,
     description TEXT,
     rating REAL,
@@ -44,9 +45,24 @@ CREATE TABLE IF NOT EXISTS hardcover_enrichment (
     last_checked_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS hardcover_authors (
+    author_id INTEGER PRIMARY KEY,
+    name TEXT,
+    born_date TEXT,
+    born_year INTEGER,
+    death_year INTEGER,
+    location TEXT,
+    gender_id INTEGER,
+    is_lgbtq INTEGER,
+    is_bipoc INTEGER,
+    last_error TEXT,
+    last_checked_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_nyt_isbn13 ON nyt_entries(isbn13);
 CREATE INDEX IF NOT EXISTS idx_openlibrary_enrimchment_isbn13 ON openlibrary_enrichment(isbn13);
 CREATE INDEX IF NOT EXISTS idx_hardcover_enrichment_isbn13 ON hardcover_enrichment(isbn13);
+CREATE INDEX IF NOT EXISTS idx_hardcover_enrichment_author_id ON hardcover_enrichment(author_id);
 """
 
 @dataclass (frozen=True)
@@ -74,6 +90,7 @@ class OpenLibraryEnrichmentRow:
 class HardcoverEnrichmentRow:
     isbn13: str
     book_id: Optional[int]
+    author_id: Optional[int]
     title: Optional[str]
     description: Optional[str]
     rating: Optional[float]
@@ -82,12 +99,27 @@ class HardcoverEnrichmentRow:
     cached_tags: Optional[str]
     last_error: Optional[str]
 
+
+@dataclass(frozen=True)
+class HardcoverAuthorRow:
+    author_id: int
+    name: Optional[str]
+    born_date: Optional[str]
+    born_year: Optional[int]
+    death_year: Optional[int]
+    location: Optional[str]
+    gender_id: Optional[int]
+    is_lgbtq: Optional[bool]
+    is_bipoc: Optional[bool]
+    last_error: Optional[str]
+
 class Repo:
     def __init__(self, conn: sqlite3.Connection) -> None:
          self.conn = conn
 
     def init_schema(self) -> None:
         self.conn.executescript(SCHEMA_SQL)
+        self._ensure_column("hardcover_enrichment", "author_id", "INTEGER")
         self.conn.commit()
     
     def upsert_nyt_entries(self, entries: Iterable[NytEntry]) -> int:
@@ -146,6 +178,23 @@ class Repo:
         cur = self.conn.execute(sql, (1 if missing_only else 0, limit))
         return [row[0] for row in cur.fetchall() if row[0]]
 
+    def list_hardcover_author_ids(
+        self,
+        limit: int = 500,
+        missing_only: bool = True,
+    ) -> list[int]:
+        sql = """
+        SELECT DISTINCT h.author_id
+        FROM hardcover_enrichment h
+        LEFT JOIN hardcover_authors a ON a.author_id = h.author_id
+        WHERE h.author_id IS NOT NULL
+          AND (? = 0 OR a.author_id IS NULL)
+        ORDER BY h.author_id
+        LIMIT ?
+        """
+        cur = self.conn.execute(sql, (1 if missing_only else 0, limit))
+        return [row[0] for row in cur.fetchall() if row[0] is not None]
+
     def upsert_openlibrary_enrichment(self, rows: Iterable[OpenLibraryEnrichmentRow]) -> int:
         sql = """
         INSERT INTO openlibrary_enrichment
@@ -182,10 +231,11 @@ class Repo:
     def upsert_hardcover_enrichment(self, rows: Iterable[HardcoverEnrichmentRow]) -> int:
         sql = """
         INSERT INTO hardcover_enrichment
-        (isbn13, book_id, title, description, rating, ratings_count, users_read_count, cached_tags, last_error, last_checked_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (isbn13, book_id, author_id, title, description, rating, ratings_count, users_read_count, cached_tags, last_error, last_checked_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(isbn13) DO UPDATE SET
             book_id=COALESCE(excluded.book_id, hardcover_enrichment.book_id),
+            author_id=COALESCE(excluded.author_id, hardcover_enrichment.author_id),
             title=COALESCE(excluded.title, hardcover_enrichment.title),
             description=COALESCE(excluded.description, hardcover_enrichment.description),
             rating=COALESCE(excluded.rating, hardcover_enrichment.rating),
@@ -204,6 +254,7 @@ class Repo:
                 (
                     r.isbn13,
                     r.book_id,
+                    r.author_id,
                     r.title,
                     r.description,
                     r.rating,
@@ -217,3 +268,60 @@ class Repo:
             count += 1
         self.conn.commit()
         return count
+
+    def upsert_hardcover_authors(self, rows: Iterable[HardcoverAuthorRow]) -> int:
+        sql = """
+        INSERT INTO hardcover_authors
+        (author_id, name, born_date, born_year, death_year, location, gender_id, is_lgbtq, is_bipoc, last_error, last_checked_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(author_id) DO UPDATE SET
+            name=COALESCE(excluded.name, hardcover_authors.name),
+            born_date=COALESCE(excluded.born_date, hardcover_authors.born_date),
+            born_year=COALESCE(excluded.born_year, hardcover_authors.born_year),
+            death_year=COALESCE(excluded.death_year, hardcover_authors.death_year),
+            location=COALESCE(excluded.location, hardcover_authors.location),
+            gender_id=COALESCE(excluded.gender_id, hardcover_authors.gender_id),
+            is_lgbtq=COALESCE(excluded.is_lgbtq, hardcover_authors.is_lgbtq),
+            is_bipoc=COALESCE(excluded.is_bipoc, hardcover_authors.is_bipoc),
+            last_error=excluded.last_error,
+            last_checked_at=excluded.last_checked_at
+        """
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        cur = self.conn.cursor()
+        count = 0
+        for r in rows:
+            cur.execute(
+                sql,
+                (
+                    r.author_id,
+                    r.name,
+                    r.born_date,
+                    r.born_year,
+                    r.death_year,
+                    r.location,
+                    r.gender_id,
+                    _bool_to_int(r.is_lgbtq),
+                    _bool_to_int(r.is_bipoc),
+                    r.last_error,
+                    now,
+                ),
+            )
+            count += 1
+        self.conn.commit()
+        return count
+
+    def _ensure_column(self, table_name: str, column_name: str, column_type: str) -> None:
+        existing_columns = {
+            row[1]
+            for row in self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name not in existing_columns:
+            self.conn.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+            )
+
+
+def _bool_to_int(value: Optional[bool]) -> Optional[int]:
+    if value is None:
+        return None
+    return int(value)

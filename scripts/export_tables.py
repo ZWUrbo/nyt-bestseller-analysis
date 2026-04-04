@@ -11,7 +11,7 @@ import pandas as pd
 from src.config import settings
 from src.utils.io import connect_sqlite
 
-TABLE_NAMES = ("nyt_entries", "openlibrary_enrichment", "hardcover_enrichment")
+TABLE_NAMES = ("nyt_entries", "openlibrary_enrichment", "hardcover_enrichment", "hardcover_authors")
 HARDCOVER_CATEGORY_COLUMNS = {
     "Content Warning": "content_warning",
     "Genre": "genre",
@@ -93,6 +93,21 @@ def make_hardcover_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return export_frame
 
 
+def make_hardcover_author_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    export_frame = frame.copy()
+
+    for column in export_frame.select_dtypes(include=["object"]).columns:
+        export_frame[column] = export_frame[column].map(normalize_text)
+
+    for column in ("is_lgbtq", "is_bipoc"):
+        if column in export_frame.columns:
+            export_frame[column] = export_frame[column].map(
+                lambda value: None if pd.isna(value) else bool(int(value))
+            )
+
+    return export_frame
+
+
 def export_table(db_path: Path, output_dir: Path, table_name: str) -> tuple[Path, int, int]:
     conn = connect_sqlite(db_path)
     try:
@@ -102,6 +117,8 @@ def export_table(db_path: Path, output_dir: Path, table_name: str) -> tuple[Path
 
     if table_name == "hardcover_enrichment":
         frame = make_hardcover_export_frame(frame)
+    elif table_name == "hardcover_authors":
+        frame = make_hardcover_author_export_frame(frame)
 
     output_path = output_dir / f"{table_name}.csv"
     frame.to_csv(output_path, index=False)

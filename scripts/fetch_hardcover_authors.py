@@ -1,41 +1,47 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
 from typing import List
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import settings
 from src.ingest.hardcover import HardcoverClient, HardcoverConfig
 from src.ingest.http import HttpClient
-from src.ingest.repo import HardcoverEnrichmentRow, Repo
+from src.ingest.repo import HardcoverAuthorRow, Repo
 from src.utils.io import connect_sqlite
 from src.utils.logging import get_logger
 
-logger = get_logger("fetch_hardcover")
+logger = get_logger("fetch_hardcover_authors")
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--limit", type=int, default=1000, help="Max number of ISBN13 values to process per run.")
+    p.add_argument("--limit", type=int, default=1000, help="Max number of Hardcover author ids to process per run.")
     p.add_argument(
         "--refresh-all",
         action="store_true",
-        help="Reprocess all distinct NYT ISBN13 values, not only missing Hardcover rows.",
+        help="Reprocess all distinct Hardcover author ids, not only missing author rows.",
     )
     p.add_argument(
         "--batch-size",
         type=int,
         default=200,
-        help="Commit batch size for hardcover_enrichment upserts.",
+        help="Commit batch size for hardcover_authors upserts.",
     )
     return p.parse_args()
 
 
 def flush_batches(
     repo: Repo,
-    enrichment_rows: List[HardcoverEnrichmentRow],
+    author_rows: List[HardcoverAuthorRow],
 ) -> int:
-    count = repo.upsert_hardcover_enrichment(enrichment_rows) if enrichment_rows else 0
-    enrichment_rows.clear()
+    count = repo.upsert_hardcover_authors(author_rows) if author_rows else 0
+    author_rows.clear()
     return count
 
 
@@ -44,7 +50,7 @@ def main() -> None:
     settings.ensure_dirs()
 
     if not settings.hardcover_api_token:
-        raise SystemExit("HARDCOVER_API_TOKEN is required for Hardcover enrichment.")
+        raise SystemExit("HARDCOVER_API_TOKEN is required for Hardcover author enrichment.")
 
     http = HttpClient(
         cache_path=settings.http_cache_path,
@@ -64,67 +70,66 @@ def main() -> None:
     repo = Repo(conn)
     repo.init_schema()
 
-    isbn13_values = repo.list_nyt_isbn13(
+    author_ids = repo.list_hardcover_author_ids(
         limit=args.limit,
         missing_only=not args.refresh_all,
-        enrichment_table="hardcover_enrichment",
     )
 
-    if not isbn13_values:
-        logger.info("No ISBN13 rows to process.")
+    if not author_ids:
+        logger.info("No Hardcover author ids to process.")
         conn.close()
         return
 
     logger.info(
-        "Hardcover enrichment: processing %s isbn13 values (refresh_all=%s).",
-        len(isbn13_values),
+        "Hardcover author enrichment: processing %s author ids (refresh_all=%s).",
+        len(author_ids),
         args.refresh_all,
     )
 
     total_upserts = 0
     failures = 0
-    enrichment_batch: List[HardcoverEnrichmentRow] = []
+    author_batch: List[HardcoverAuthorRow] = []
 
-    for idx, isbn13 in enumerate(isbn13_values, start=1):
+    for idx, author_id in enumerate(author_ids, start=1):
         try:
-            row = hardcover.fetch_isbn13_book(isbn13)
+            row = hardcover.fetch_author(author_id)
             if row.last_error:
                 failures += 1
-            enrichment_batch.append(row)
+            author_batch.append(row)
         except Exception as exc:
             failures += 1
-            enrichment_batch.append(
-                HardcoverEnrichmentRow(
-                    isbn13=isbn13,
-                    book_id=None,
-                    author_id=None,
-                    title=None,
-                    description=None,
-                    rating=None,
-                    ratings_count=None,
-                    users_read_count=None,
-                    cached_tags=None,
+            author_batch.append(
+                HardcoverAuthorRow(
+                    author_id=author_id,
+                    name=None,
+                    born_date=None,
+                    born_year=None,
+                    death_year=None,
+                    location=None,
+                    gender_id=None,
+                    is_lgbtq=None,
+                    is_bipoc=None,
                     last_error=f"unexpected_error:{str(exc)[:200]}",
                 )
             )
 
-        if len(enrichment_batch) >= args.batch_size:
-            n = flush_batches(repo, enrichment_batch)
+        if len(author_batch) >= args.batch_size:
+            n = flush_batches(repo, author_batch)
             total_upserts += n
             logger.info(
-                "Progress %s/%s | enrichment_upserts=%s | failures=%s",
+                "Progress %s/%s | author_upserts=%s | failures=%s",
                 idx,
-                len(isbn13_values),
+                len(author_ids),
                 total_upserts,
                 failures,
             )
 
-    n = flush_batches(repo, enrichment_batch)
+    n = flush_batches(repo, author_batch)
     total_upserts += n
 
     logger.info(
-        "Done. isbn13_processed=%s enrichment_upserts=%s failures=%s",
-        len(isbn13_values),
+        "Done. author_ids_processed=%s author_upserts=%s failures=%s",
+        len(author_ids),
         total_upserts,
         failures,
     )
