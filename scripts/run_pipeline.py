@@ -50,6 +50,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip Hardcover author enrichment step.",
     )
+    p.add_argument(
+        "--skip-gemini",
+        action="store_true",
+        help="Skip Gemini content summary enrichment step.",
+    )
     return p.parse_args()
 
 
@@ -86,6 +91,11 @@ def main() -> None:
         hardcover_authors_cmd.append("--refresh-all")
     hardcover_authors_cmd.extend(["--batch-size", str(args.batch_size)])
 
+    gemini_cmd = [sys.executable, "scripts/fetch_gemini_summaries.py"]
+    gemini_cmd.extend(["--limit", str(args.limit)])
+    if args.refresh_all:
+        gemini_cmd.append("--refresh-all")
+
     try:
         if not args.skip_nyt:
             run_step(nyt_cmd, project_root, "NYT extraction")
@@ -95,6 +105,8 @@ def main() -> None:
             run_step(hardcover_cmd, project_root, "Hardcover enrichment")
         if not args.skip_hardcover_authors:
             run_step(hardcover_authors_cmd, project_root, "Hardcover author enrichment")
+        if not args.skip_gemini:
+            run_step(gemini_cmd, project_root, "Gemini content summary enrichment")
     except subprocess.CalledProcessError as exc:
         print(f"[pipeline] Failed during step: exit_code={exc.returncode}")
         raise SystemExit(exc.returncode) from exc

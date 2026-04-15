@@ -59,6 +59,15 @@ CREATE TABLE IF NOT EXISTS hardcover_authors (
     last_checked_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS gemini_content_summaries (
+    isbn13 TEXT PRIMARY KEY,
+    summary TEXT,
+    content_tags_seed TEXT,
+    raw_response TEXT,
+    last_error TEXT,
+    last_checked_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_nyt_isbn13 ON nyt_entries(isbn13);
 CREATE INDEX IF NOT EXISTS idx_openlibrary_enrimchment_isbn13 ON openlibrary_enrichment(isbn13);
 CREATE INDEX IF NOT EXISTS idx_hardcover_enrichment_isbn13 ON hardcover_enrichment(isbn13);
@@ -113,6 +122,22 @@ class HardcoverAuthorRow:
     is_bipoc: Optional[bool]
     last_error: Optional[str]
 
+
+@dataclass(frozen=True)
+class GeminiSummaryInputRow:
+    isbn13: str
+    title: Optional[str]
+    author: Optional[str]
+
+
+@dataclass(frozen=True)
+class GeminiContentSummaryRow:
+    isbn13: str
+    summary: Optional[str]
+    content_tags_seed: Sequence[str]
+    raw_response: Optional[str]
+    last_error: Optional[str]
+
 class Repo:
     def __init__(self, conn: sqlite3.Connection) -> None:
          self.conn = conn
@@ -161,7 +186,11 @@ class Repo:
         missing_only: bool = True,
         enrichment_table: str = "openlibrary_enrichment",
     ) -> list[str]:
-        if enrichment_table not in {"openlibrary_enrichment", "hardcover_enrichment"}:
+        if enrichment_table not in {
+            "openlibrary_enrichment",
+            "hardcover_enrichment",
+            "gemini_content_summaries",
+        }:
             raise ValueError(f"Unsupported enrichment table: {enrichment_table}")
 
         sql = """
@@ -177,6 +206,56 @@ class Repo:
         sql = sql.format(enrichment_table=enrichment_table)
         cur = self.conn.execute(sql, (1 if missing_only else 0, limit))
         return [row[0] for row in cur.fetchall() if row[0]]
+
+    def list_gemini_summary_inputs(
+        self,
+        limit: int = 1000,
+        missing_only: bool = True,
+    ) -> list[GeminiSummaryInputRow]:
+        return self._select_gemini_summary_inputs(
+            limit=limit,
+            missing_only=missing_only,
+        )
+
+    def _select_gemini_summary_inputs(
+        self,
+        limit: Optional[int] = None,
+        missing_only: bool = False,
+        extra_where: str = "",
+        params: tuple[object, ...] = (),
+    ) -> list[GeminiSummaryInputRow]:
+        sql = """
+        SELECT
+            n.isbn13,
+            NULLIF(MAX(n.title), '') AS title,
+            NULLIF(MAX(n.author), '') AS author
+        FROM nyt_entries n
+        LEFT JOIN gemini_content_summaries g
+            ON g.isbn13 = n.isbn13
+        WHERE n.isbn13 IS NOT NULL
+          AND TRIM(n.isbn13) <> ''
+          AND (? = 0 OR g.isbn13 IS NULL)
+          {extra_where}
+        GROUP BY n.isbn13
+        ORDER BY n.isbn13
+        """
+        sql = sql.format(extra_where=extra_where)
+        query_params: list[object] = [1 if missing_only else 0, *params]
+        if limit is not None:
+            sql += "\nLIMIT ?"
+            query_params.append(limit)
+
+        cur = self.conn.execute(sql, tuple(query_params))
+        rows: list[GeminiSummaryInputRow] = []
+        for row in cur.fetchall():
+            rows.append(
+                GeminiSummaryInputRow(
+                    isbn13=row[0],
+                    title=row[1],
+                    author=row[2],
+                )
+            )
+        return rows
 
     def list_hardcover_author_ids(
         self,
@@ -302,6 +381,40 @@ class Repo:
                     r.gender_id,
                     _bool_to_int(r.is_lgbtq),
                     _bool_to_int(r.is_bipoc),
+                    r.last_error,
+                    now,
+                ),
+            )
+            count += 1
+        self.conn.commit()
+        return count
+
+    def upsert_gemini_content_summaries(
+        self,
+        rows: Iterable[GeminiContentSummaryRow],
+    ) -> int:
+        sql = """
+        INSERT INTO gemini_content_summaries
+        (isbn13, summary, content_tags_seed, raw_response, last_error, last_checked_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(isbn13) DO UPDATE SET
+            summary=COALESCE(excluded.summary, gemini_content_summaries.summary),
+            content_tags_seed=COALESCE(excluded.content_tags_seed, gemini_content_summaries.content_tags_seed),
+            raw_response=COALESCE(excluded.raw_response, gemini_content_summaries.raw_response),
+            last_error=excluded.last_error,
+            last_checked_at=excluded.last_checked_at
+        """
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        cur = self.conn.cursor()
+        count = 0
+        for r in rows:
+            cur.execute(
+                sql,
+                (
+                    r.isbn13,
+                    r.summary,
+                    "; ".join([x for x in r.content_tags_seed if x]),
+                    r.raw_response,
                     r.last_error,
                     now,
                 ),

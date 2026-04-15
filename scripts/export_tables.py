@@ -11,7 +11,13 @@ import pandas as pd
 from src.config import settings
 from src.utils.io import connect_sqlite
 
-TABLE_NAMES = ("nyt_entries", "openlibrary_enrichment", "hardcover_enrichment", "hardcover_authors")
+TABLE_NAMES = (
+    "nyt_entries",
+    "openlibrary_enrichment",
+    "hardcover_enrichment",
+    "hardcover_authors",
+    "gemini_content_summaries",
+)
 HARDCOVER_CATEGORY_COLUMNS = {
     "Content Warning": "content_warning",
     "Genre": "genre",

@@ -14,10 +14,15 @@ class Settings(BaseModel):
     data_dir: Path = Field(default_factory=lambda: Path(__file__).resolve().parents[1] / "data")
     db_path: Path = Field(default_factory=lambda: Path(__file__).resolve().parents[1] / "data" / "interim" / "books.db")
 
-    # API keys
+    # APIs
     nyt_api_key: str = Field(default_factory=lambda: os.getenv("NYT_API_KEY", ""))
     hardcover_api_token: str = Field(default_factory=lambda: os.getenv("HARDCOVER_API_TOKEN", ""))
     hardcover_api_url: str = Field(default_factory=lambda: os.getenv("HARDCOVER_API_URL", "https://api.hardcover.app/v1/graphql"))
+    gemini_api_key: str = Field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""))
+    gemini_api_url: str = Field(default_factory=lambda: os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta"))
+
+    # AI
+    gemini_model: str = Field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"))
 
     # HTTP behavior
     http_cache_path: str = Field(default_factory=lambda: os.getenv("HTTP_CACHE_PATH", "data/interim/http_cache"))

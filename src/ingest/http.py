@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 import requests
 import requests_cache
@@ -16,16 +17,18 @@ class HttpError(RuntimeError):
 class RateLimiter:
     rps: float
     _last_ts: float = 0.0
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def wait(self) -> None:
         if self.rps <= 0:
             return
-        min_interval = 1.0 / self.rps
-        now = time.time()
-        elapsed = now - self._last_ts
-        if elapsed < min_interval:
-            time.sleep(min_interval - elapsed)
-        self._last_ts = time.time()
+        with self._lock:
+            min_interval = 1.0 / self.rps
+            now = time.time()
+            elapsed = now - self._last_ts
+            if elapsed < min_interval:
+                time.sleep(min_interval - elapsed)
+            self._last_ts = time.time()
 
 class HttpClient:
     def __init__(self, cache_path: str, expire_seconds: int, contact_email: str = "") -> None:
