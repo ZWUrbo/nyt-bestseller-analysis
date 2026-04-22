@@ -66,10 +66,10 @@ RESPONSE_SCHEMA = {
     },
 }
 TERMINAL_BATCH_STATES = {
-    "JOB_STATE_SUCCEEDED",
-    "JOB_STATE_FAILED",
-    "JOB_STATE_CANCELLED",
-    "JOB_STATE_EXPIRED",
+    "BATCH_STATE_SUCCEEDED",
+    "BATCH_STATE_FAILED",
+    "BATCH_STATE_CANCELLED",
+    "BATCH_STATE_EXPIRED",
 }
 
 
@@ -77,7 +77,7 @@ TERMINAL_BATCH_STATES = {
 class GeminiConfig:
     api_url: str
     api_key: str
-    model: str = "gemini-3.1-flash-lite-preview"
+    model: str = "gemini-2.5-flash-lite"
     temperature: float = 0.0
 
 

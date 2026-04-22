@@ -20,6 +20,10 @@ from src.utils.logging import get_logger
 
 logger = get_logger("fetch_gemini_summaries")
 
+SUCCEEDED_BATCH_STATES = {
+    "BATCH_STATE_SUCCEEDED",
+}
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
@@ -183,7 +187,7 @@ def process_existing_batch(
     if manifest_path:
         write_manifest(manifest_path, manifest)
 
-    if batch_state != "JOB_STATE_SUCCEEDED":
+    if batch_state not in SUCCEEDED_BATCH_STATES:
         if batch_state in TERMINAL_BATCH_STATES:
             batch_error = batch_payload.get("error")
             logger.info("Gemini batch ended in state %s | error=%s", batch_state, batch_error)
@@ -262,28 +266,44 @@ def extract_line_key(parsed: dict[str, Any]) -> str:
 
 
 def extract_batch_state(batch_payload: dict[str, Any]) -> str:
-    state = batch_payload.get("state")
-    if isinstance(state, str):
-        return state
-    if isinstance(state, dict):
-        state_name = state.get("name")
-        if isinstance(state_name, str):
-            return state_name
-    return "JOB_STATE_UNSPECIFIED"
+    for candidate in (
+        batch_payload.get("state"),
+        batch_payload.get("metadata"),
+        batch_payload.get("response"),
+    ):
+        if isinstance(candidate, str):
+            return candidate.strip()
+        if isinstance(candidate, dict):
+            for key in ("state", "name"):
+                state_name = candidate.get(key)
+                if isinstance(state_name, str):
+                    return state_name.strip()
+    return "BATCH_STATE_UNSPECIFIED"
 
 
 def extract_result_file_name(batch_payload: dict[str, Any]) -> str | None:
-    dest = batch_payload.get("dest")
-    if isinstance(dest, dict):
-        file_name = dest.get("fileName") or dest.get("file_name")
+    for candidate in (
+        batch_payload.get("dest"),
+        batch_payload.get("output"),
+        batch_payload.get("metadata"),
+        batch_payload.get("response"),
+    ):
+        if not isinstance(candidate, dict):
+            continue
+
+        file_name = candidate.get("fileName") or candidate.get("file_name")
         if isinstance(file_name, str) and file_name.strip():
             return file_name.strip()
 
-    output = batch_payload.get("output")
-    if isinstance(output, dict):
-        file_name = output.get("responsesFile") or output.get("responses_file")
-        if isinstance(file_name, str) and file_name.strip():
-            return file_name.strip()
+        output = candidate.get("output")
+        if isinstance(output, dict):
+            nested_file_name = output.get("responsesFile") or output.get("responses_file")
+            if isinstance(nested_file_name, str) and nested_file_name.strip():
+                return nested_file_name.strip()
+
+        responses_file = candidate.get("responsesFile") or candidate.get("responses_file")
+        if isinstance(responses_file, str) and responses_file.strip():
+            return responses_file.strip()
 
     return None
 
