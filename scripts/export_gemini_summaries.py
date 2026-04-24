@@ -47,6 +47,13 @@ def normalize_text(value: object) -> object:
     return WHITESPACE_RE.sub(" ", value.replace("\r", " ").replace("\n", " ")).strip()
 
 
+def normalize_tag_seed(value: object) -> str | None:
+    cleaned = normalize_text(value)
+    if not isinstance(cleaned, str) or not cleaned:
+        return None
+    return cleaned.lower().title()
+
+
 def connect_sqlite(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
@@ -78,10 +85,17 @@ def load_gemini_rows(db_path: Path) -> list[dict[str, object]]:
 
 
 def make_export_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
-    return [
-        {column_name: normalize_text(value) for column_name, value in row.items()}
-        for row in rows
-    ]
+    export_rows: list[dict[str, object]] = []
+    for row in rows:
+        normalized_row = {
+            column_name: normalize_text(value)
+            for column_name, value in row.items()
+        }
+        normalized_row["content_tags_seed"] = "; ".join(
+            split_content_tags(row.get("content_tags_seed"))
+        )
+        export_rows.append(normalized_row)
+    return export_rows
 
 
 def split_content_tags(raw_value: object) -> list[str]:
@@ -91,8 +105,8 @@ def split_content_tags(raw_value: object) -> list[str]:
     seen_tags: set[str] = set()
     ordered_tags: list[str] = []
     for part in raw_value.split(";"):
-        cleaned = normalize_text(part)
-        if not isinstance(cleaned, str) or not cleaned:
+        cleaned = normalize_tag_seed(part)
+        if not cleaned:
             continue
         if cleaned in seen_tags:
             continue
