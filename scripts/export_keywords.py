@@ -220,9 +220,6 @@ def split_pipe_list(raw_value: str | None) -> list[str]:
 
 
 def build_final_text(row: dict[str, str]) -> str:
-    if (final_text := (row.get("final_text") or "").strip()):
-        return final_text
-
     parts: list[str] = []
     title = (row.get("title") or "").strip()
     author = (row.get("author") or "").strip()
