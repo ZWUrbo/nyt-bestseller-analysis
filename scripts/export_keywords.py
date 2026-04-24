@@ -224,8 +224,7 @@ def build_final_text(row: dict[str, str]) -> str:
     title = (row.get("title") or "").strip()
     author = (row.get("author") or "").strip()
     description = (
-        (row.get("best_description") or "").strip()
-        or (row.get("desc_hardcover") or "").strip()
+        (row.get("desc_hardcover") or "").strip()
         or (row.get("desc_openlibrary") or "").strip()
         or (row.get("desc_nyt") or "").strip()
     )
