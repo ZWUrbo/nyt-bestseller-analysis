@@ -5,9 +5,13 @@ import csv
 import json
 import math
 import re
+import sqlite3
 import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
+
+from src.config import settings
+from src.utils.io import connect_sqlite
 
 
 WHITESPACE_RE = re.compile(r"\s+")
@@ -126,24 +130,24 @@ STOPWORDS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Export Tableau-friendly keyword files from the pipeline output CSV."
+        description="Export Tableau-friendly keyword files from SQLite enrichment tables."
     )
     parser.add_argument(
-        "--input",
+        "--db-path",
         type=Path,
-        default=Path("/Users/zacurbiztondo/Desktop/isbn13_text_enrichment_pipeline_output.csv"),
-        help="Path to the pipeline CSV containing enrichment columns.",
+        default=settings.db_path,
+        help="Path to the SQLite database.",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("data/processed/features/isbn13_keywords.csv"),
+        default=settings.data_dir / "processed" / "features" / "isbn13_keywords.csv",
         help="Compact output CSV with isbn13 and JSON-encoded keywords.",
     )
     parser.add_argument(
         "--tableau-output",
         type=Path,
-        default=Path("data/processed/features/isbn13_keyword_tableau.csv"),
+        default=settings.data_dir / "processed" / "features" / "isbn13_keyword_tableau.csv",
         help="Long output CSV with one row per isbn13/keyword pair.",
     )
     parser.add_argument(
@@ -403,25 +407,61 @@ def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def export_keywords(input_path: Path, output_path: Path, tableau_output_path: Path, top_n: int) -> tuple[int, int]:
+def iter_source_rows(db_path: Path) -> list[dict[str, str]]:
+    query = """
+    SELECT
+        n.isbn13 AS isbn13,
+        COALESCE(NULLIF(MAX(n.title), ''), '') AS title,
+        COALESCE(NULLIF(MAX(n.author), ''), '') AS author,
+        COALESCE(NULLIF(MAX(n.description), ''), '') AS desc_nyt,
+        COALESCE(o.subjects, '') AS subjects,
+        COALESCE(o.subject_places, '') AS subject_places,
+        COALESCE(o.description, '') AS desc_openlibrary,
+        COALESCE(h.description, '') AS desc_hardcover,
+        COALESCE(h.cached_tags, '') AS cached_tags
+    FROM nyt_entries n
+    LEFT JOIN openlibrary_enrichment o
+        ON o.isbn13 = n.isbn13
+    LEFT JOIN hardcover_enrichment h
+        ON h.isbn13 = n.isbn13
+    WHERE n.isbn13 IS NOT NULL
+      AND TRIM(n.isbn13) <> ''
+    GROUP BY
+        n.isbn13,
+        o.subjects,
+        o.subject_places,
+        o.description,
+        h.description,
+        h.cached_tags
+    ORDER BY n.isbn13
+    """
+    conn = connect_sqlite(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(query).fetchall()
+    finally:
+        conn.close()
+    return [{key: (row[key] or "") for key in row.keys()} for row in rows]
+
+
+def export_keywords(db_path: Path, output_path: Path, tableau_output_path: Path, top_n: int) -> tuple[int, int]:
     ensure_parent(output_path)
     ensure_parent(tableau_output_path)
 
     row_count = 0
     keyword_count = 0
+    source_rows = iter_source_rows(db_path)
 
     with (
-        input_path.open(newline="", encoding="utf-8-sig") as infile,
         output_path.open("w", newline="", encoding="utf-8") as compact_outfile,
         tableau_output_path.open("w", newline="", encoding="utf-8") as tableau_outfile,
     ):
-        reader = csv.DictReader(infile)
         compact_writer = csv.DictWriter(compact_outfile, fieldnames=["isbn13", "keywords"])
         tableau_writer = csv.DictWriter(tableau_outfile, fieldnames=["isbn13", "keyword"])
         compact_writer.writeheader()
         tableau_writer.writeheader()
 
-        for row in reader:
+        for row in source_rows:
             isbn13 = (row.get("isbn13") or "").strip()
             if not isbn13:
                 continue
@@ -440,7 +480,7 @@ def export_keywords(input_path: Path, output_path: Path, tableau_output_path: Pa
 def main() -> None:
     args = parse_args()
     row_count, keyword_count = export_keywords(
-        input_path=args.input,
+        db_path=args.db_path,
         output_path=args.output,
         tableau_output_path=args.tableau_output,
         top_n=args.top_n,
