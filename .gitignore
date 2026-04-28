@@ -25,3 +25,7 @@ data/**/http_cache*
 
 # Notebooks
 notebooks/data_audit.ipynb
+
+# Exports
+scripts/export_subject_dtm.py
+scripts/export_hardcover_tag_dtms.py
