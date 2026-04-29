@@ -9,7 +9,10 @@ from typing import Sequence
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Run the ingestion pipeline in order: NYT extraction, Open Library enrichment, Hardcover enrichment, then Hardcover author enrichment."
+        description=(
+            "Run the pipeline in order: ingestion, enrichment, Gemini summaries, "
+            "then CSV exports."
+        )
     )
     p.add_argument("--start", type=str, default=None, help="NYT start date (YYYY-MM-DD).")
     p.add_argument("--end", type=str, default=None, help="NYT end date (YYYY-MM-DD).")
@@ -55,6 +58,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip Gemini content summary enrichment step.",
     )
+    p.add_argument(
+        "--skip-exports",
+        action="store_true",
+        help="Skip final CSV export steps.",
+    )
     return p.parse_args()
 
 
@@ -96,6 +104,12 @@ def main() -> None:
     if args.refresh_all:
         gemini_cmd.append("--refresh-all")
 
+    export_cmds = [
+        ([sys.executable, "scripts/export_tables.py"], "table exports"),
+        ([sys.executable, "scripts/export_gemini_summaries.py"], "Gemini summary exports"),
+        ([sys.executable, "scripts/export_keywords.py"], "keyword exports"),
+    ]
+
     try:
         if not args.skip_nyt:
             run_step(nyt_cmd, project_root, "NYT extraction")
@@ -107,6 +121,9 @@ def main() -> None:
             run_step(hardcover_authors_cmd, project_root, "Hardcover author enrichment")
         if not args.skip_gemini:
             run_step(gemini_cmd, project_root, "Gemini content summary enrichment")
+        if not args.skip_exports:
+            for export_cmd, step_name in export_cmds:
+                run_step(export_cmd, project_root, step_name)
     except subprocess.CalledProcessError as exc:
         print(f"[pipeline] Failed during step: exit_code={exc.returncode}")
         raise SystemExit(exc.returncode) from exc
