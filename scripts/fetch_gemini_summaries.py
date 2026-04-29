@@ -62,10 +62,10 @@ def parse_args() -> argparse.Namespace:
         help="Poll the batch job until it reaches a terminal state and import results if it succeeds.",
     )
     p.add_argument(
-        "--poll-interval-seconds",
+        "--poll-interval-hours",
         type=int,
-        default=30,
-        help="Polling interval when --wait is enabled.",
+        default=1,
+        help="Polling interval in hours when --wait is enabled.",
     )
     return p.parse_args()
 
@@ -73,7 +73,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     settings.ensure_dirs()
-    args.poll_interval_seconds = max(args.poll_interval_seconds, 5)
+    poll_interval_seconds = max(args.poll_interval_hours, 1) * 60 * 60
 
     if not settings.gemini_api_key:
         raise SystemExit("GEMINI_API_KEY is required for Gemini content summaries.")
@@ -95,7 +95,14 @@ def main() -> None:
         manifest["batch_name"] = args.batch_name
         if manifest_path:
             write_manifest(manifest_path, manifest)
-        process_existing_batch(gemini, manifest, manifest_path, gemini_dir, wait=args.wait, poll_interval_seconds=args.poll_interval_seconds)
+        process_existing_batch(
+            gemini,
+            manifest,
+            manifest_path,
+            gemini_dir,
+            wait=args.wait,
+            poll_interval_seconds=poll_interval_seconds,
+        )
         return
 
     conn = connect_sqlite(settings.db_path)
@@ -151,7 +158,7 @@ def main() -> None:
         manifest_path,
         gemini_dir,
         wait=args.wait,
-        poll_interval_seconds=args.poll_interval_seconds,
+        poll_interval_seconds=poll_interval_seconds,
     )
 
 
