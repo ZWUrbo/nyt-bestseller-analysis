@@ -11,12 +11,13 @@ DATA_DIR = PROJECT_ROOT / "data"
 DEFAULT_DB_PATH = DATA_DIR / "interim" / "books.db"
 
 WHITESPACE_RE = re.compile(r"\s+")
+NULL_TEXT = "None"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Export gemini_content_summaries to a flat CSV and a Tableau-friendly "
+            "Export Gemini seed content tags to a Tableau-friendly "
             "isbn13/content tag CSV."
         )
     )
@@ -29,12 +30,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=DATA_DIR / "processed" / "exports" / "gemini_content_summaries.csv",
-        help="Destination CSV path for the Gemini table export.",
-    )
-    parser.add_argument(
-        "--tableau-output",
-        type=Path,
         default=DATA_DIR / "processed" / "features" / "isbn13_content_tags_seed_tableau.csv",
         help="Destination CSV path for the Tableau-friendly content tag export.",
     )
@@ -42,6 +37,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_text(value: object) -> object:
+    if value is None:
+        return NULL_TEXT
     if not isinstance(value, str):
         return value
     return WHITESPACE_RE.sub(" ", value.replace("\r", " ").replace("\n", " ")).strip()
@@ -67,11 +64,7 @@ def load_gemini_rows(db_path: Path) -> list[dict[str, object]]:
     query = """
     SELECT
         isbn13,
-        summary,
-        content_tags_seed,
-        raw_response,
-        last_error,
-        last_checked_at
+        content_tags_seed
     FROM gemini_content_summaries
     ORDER BY isbn13
     """
@@ -82,20 +75,6 @@ def load_gemini_rows(db_path: Path) -> list[dict[str, object]]:
         return [dict(row) for row in rows]
     finally:
         conn.close()
-
-
-def make_export_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
-    export_rows: list[dict[str, object]] = []
-    for row in rows:
-        normalized_row = {
-            column_name: normalize_text(value)
-            for column_name, value in row.items()
-        }
-        normalized_row["content_tags_seed"] = "; ".join(
-            split_content_tags(row.get("content_tags_seed"))
-        )
-        export_rows.append(normalized_row)
-    return export_rows
 
 
 def split_content_tags(raw_value: object) -> list[str]:
@@ -140,26 +119,25 @@ def build_tableau_rows(rows: list[dict[str, object]]) -> list[dict[str, str | in
 
 def write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as outfile:
-        writer = csv.DictWriter(outfile, fieldnames=fieldnames)
+    with path.open("w", newline="", encoding="utf-8-sig") as outfile:
+        writer = csv.DictWriter(
+            outfile,
+            fieldnames=fieldnames,
+            quoting=csv.QUOTE_ALL,
+            lineterminator="\n",
+            restval=NULL_TEXT,
+        )
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(
+            {
+                fieldname: normalize_text(row.get(fieldname))
+                for fieldname in fieldnames
+            }
+            for row in rows
+        )
 
 
-def export_fieldnames(rows: list[dict[str, object]]) -> list[str]:
-    if rows:
-        return list(rows[0].keys())
-    return [
-        "isbn13",
-        "summary",
-        "content_tags_seed",
-        "raw_response",
-        "last_error",
-        "last_checked_at",
-    ]
-
-
-def tableau_fieldnames() -> list[str]:
+def output_fieldnames() -> list[str]:
     return ["isbn13", "content_tag_seed", "value"]
 
 
@@ -170,19 +148,13 @@ def main() -> None:
     (DATA_DIR / "processed").mkdir(parents=True, exist_ok=True)
 
     source_rows = load_gemini_rows(args.db_path)
-    export_rows = make_export_rows(source_rows)
-    tableau_rows = build_tableau_rows(source_rows)
+    output_rows = build_tableau_rows(source_rows)
 
-    write_csv(args.output, export_fieldnames(export_rows), export_rows)
-    write_csv(args.tableau_output, tableau_fieldnames(), tableau_rows)
+    write_csv(args.output, output_fieldnames(), output_rows)
 
     print(
-        f"Exported Gemini summaries to {args.output} "
-        f"(rows={len(export_rows)}, columns={len(export_fieldnames(export_rows))})."
-    )
-    print(
-        f"Exported Gemini content tags Tableau source to {args.tableau_output} "
-        f"(rows={len(tableau_rows)}, columns={len(tableau_fieldnames())})."
+        f"Exported Gemini content tags Tableau source to {args.output} "
+        f"(rows={len(output_rows)}, columns={len(output_fieldnames())})."
     )
 
 

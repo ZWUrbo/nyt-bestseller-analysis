@@ -65,7 +65,7 @@ After ingestion, the project provides export scripts for flat analytical outputs
 
 - `scripts/export_tables.py`
 - `scripts/export_keywords.py`
-- `scripts/export_gemini_summaries.py`
+- `scripts/export_gemini_content_tags.py`
 
 ## Outputs
 
@@ -203,7 +203,7 @@ python scripts/run_pipeline.py --skip-hardcover-authors
 ```bash
 python scripts/export_tables.py
 python scripts/export_keywords.py
-python scripts/export_gemini_summaries.py
+python scripts/export_gemini_content_tags.py
 ```
 
 ## Notes

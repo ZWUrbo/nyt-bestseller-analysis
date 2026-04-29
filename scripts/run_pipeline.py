@@ -106,7 +106,7 @@ def main() -> None:
 
     export_cmds = [
         ([sys.executable, "scripts/export_tables.py"], "table exports"),
-        ([sys.executable, "scripts/export_gemini_summaries.py"], "Gemini summary exports"),
+        ([sys.executable, "scripts/export_gemini_content_tags.py"], "Gemini content tag exports"),
         ([sys.executable, "scripts/export_keywords.py"], "keyword exports"),
     ]
 

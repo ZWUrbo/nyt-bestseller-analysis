@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 from pathlib import Path
@@ -25,6 +26,7 @@ HARDCOVER_CATEGORY_COLUMNS = {
     "Tag": "tag",
 }
 WHITESPACE_RE = re.compile(r"\s+")
+NULL_TEXT = "None"
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,6 +52,15 @@ def normalize_text(value: Any) -> Any:
     if not isinstance(value, str):
         return value
     return WHITESPACE_RE.sub(" ", value.replace("\r", " ").replace("\n", " ")).strip()
+
+
+def normalize_tableau_text(value: Any) -> str:
+    if pd.isna(value):
+        return NULL_TEXT
+    normalized = normalize_text(value)
+    if normalized is None:
+        return NULL_TEXT
+    return str(normalized) or NULL_TEXT
 
 
 def parse_cached_tags(raw_value: Any) -> dict[str, list[dict[str, Any]]]:
@@ -85,7 +96,7 @@ def extract_tag_names(category_items: list[dict[str, Any]]) -> list[str]:
 def make_hardcover_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
     export_frame = frame.copy()
 
-    for column in export_frame.select_dtypes(include=["object"]).columns:
+    for column in text_columns(export_frame):
         export_frame[column] = export_frame[column].map(normalize_text)
 
     parsed_tags = export_frame["cached_tags"].map(parse_cached_tags) if "cached_tags" in export_frame.columns else None
@@ -102,7 +113,7 @@ def make_hardcover_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
 def make_hardcover_author_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
     export_frame = frame.copy()
 
-    for column in export_frame.select_dtypes(include=["object"]).columns:
+    for column in text_columns(export_frame):
         export_frame[column] = export_frame[column].map(normalize_text)
 
     for column in ("is_lgbtq", "is_bipoc"):
@@ -112,6 +123,24 @@ def make_hardcover_author_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
             )
 
     return export_frame
+
+
+def make_gemini_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    export_frame = frame.copy()
+
+    for column in export_frame.columns:
+        export_frame[column] = export_frame[column].map(normalize_tableau_text)
+
+    return export_frame
+
+
+def text_columns(frame: pd.DataFrame) -> list[str]:
+    return [
+        column
+        for column in frame.columns
+        if pd.api.types.is_object_dtype(frame[column])
+        or pd.api.types.is_string_dtype(frame[column])
+    ]
 
 
 def export_table(db_path: Path, output_dir: Path, table_name: str) -> tuple[Path, int, int]:
@@ -125,9 +154,18 @@ def export_table(db_path: Path, output_dir: Path, table_name: str) -> tuple[Path
         frame = make_hardcover_export_frame(frame)
     elif table_name == "hardcover_authors":
         frame = make_hardcover_author_export_frame(frame)
+    elif table_name == "gemini_content_summaries":
+        frame = make_gemini_export_frame(frame)
 
     output_path = output_dir / f"{table_name}.csv"
-    frame.to_csv(output_path, index=False)
+    frame.to_csv(
+        output_path,
+        index=False,
+        encoding="utf-8-sig",
+        quoting=csv.QUOTE_ALL,
+        lineterminator="\n",
+        na_rep=NULL_TEXT,
+    )
     return output_path, len(frame), len(frame.columns)
 
 
