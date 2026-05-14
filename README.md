@@ -2,7 +2,7 @@
 
 A reproducible Python data pipeline for collecting, enriching, and exporting New York Times bestseller data for literary analysis, exploratory research, and analytics storytelling.
 
-This project uses the New York Times bestseller lists as a starting point, then enriches each title with metadata from Open Library and Hardcover, plus AI-assisted summaries and content tags from Gemini. The result is a local SQLite database and a set of analysis-ready CSV outputs that make it easier to study the subjects, themes, signals, and patterns present in widely read books.
+This project uses the New York Times bestseller lists as a starting point, then enriches each title with metadata from Open Library and Hardcover, plus AI-assisted summaries, content tags, and author detail fields from Gemini. The result is a local SQLite database and a set of analysis-ready CSV outputs that make it easier to study the subjects, themes, signals, authorship, and patterns present in widely read books.
 
 ## Project Motivation
 
@@ -16,8 +16,8 @@ Using the New York Times bestseller lists as a proxy for widely consumed books, 
 - Enriches titles by `isbn13` with subjects, places, descriptions, and edition metadata from Open Library
 - Adds Hardcover metadata such as ratings, readership signals, and tag groupings
 - Enriches author records with additional Hardcover profile fields
-- Generates AI-assisted summaries and seed content tags using Gemini
-- Extracts high-confidence author detail fields using Gemini
+- Generates AI-assisted summaries and seed content tags using Gemini batch jobs
+- Extracts high-confidence author detail fields using Gemini batch jobs
 - Exports clean CSV datasets for notebooks, SQL, BI tools, and Tableau-style analysis
 
 ## Why It’s Useful
@@ -39,7 +39,7 @@ This repository sits at the intersection of data engineering, analytics, and cul
 - `Hardcover API`
   Book enrichment, readership signals, ratings, and tag groupings
 - `Gemini`
-  AI-assisted summaries and seed content tags
+  AI-assisted summaries, seed content tags, and structured author detail extraction
 
 ## Pipeline Overview
 
@@ -60,9 +60,9 @@ Pipeline stages:
 4. `scripts/fetch_hardcover_authors.py`
    Enriches related authors with additional author-level data.
 5. `scripts/fetch_gemini_summaries.py`
-   Generates AI-assisted summaries and seed content tags.
+   Creates, polls, and imports Gemini batch jobs for content summaries and seed content tags.
 6. `scripts/fetch_gemini_author_details.py`
-   Extracts structured author detail fields.
+   Creates, polls, and imports Gemini batch jobs for structured author detail fields.
 
 After ingestion, the project provides export scripts for flat analytical outputs:
 
@@ -105,6 +105,9 @@ literary-analysis/
 ├── scripts/
 ├── src/
 │   ├── ingest/
+│   │   ├── gemini.py
+│   │   ├── gemini_summaries.py
+│   │   └── gemini_author_details.py
 │   └── utils/
 ├── README.md
 ├── pyproject.toml
@@ -178,6 +181,8 @@ Optional environment variables:
 python scripts/run_pipeline.py
 ```
 
+The Gemini stages use the batch API. A run may create a batch job and save its manifest under `data/interim/gemini/` before results are ready. Re-run the relevant Gemini script with `--batch-name` and `--wait` to poll and import completed results.
+
 ### Run for a specific date range
 
 ```bash
@@ -205,6 +210,16 @@ python scripts/run_pipeline.py --skip-hardcover-authors
 python scripts/run_pipeline.py --skip-gemini-author-details
 ```
 
+### Work with Gemini batch jobs directly
+
+```bash
+python scripts/fetch_gemini_summaries.py --limit 1000
+python scripts/fetch_gemini_summaries.py --batch-name <batch-name> --wait
+
+python scripts/fetch_gemini_author_details.py --limit 1000
+python scripts/fetch_gemini_author_details.py --batch-name <batch-name> --wait
+```
+
 ### Export analytical datasets
 
 ```bash
@@ -218,16 +233,18 @@ python scripts/export_gemini_content_tags.py
 - The pipeline is designed to be incremental, with enrichment keyed primarily by `isbn13`.
 - Request caching is used to reduce redundant API calls and make repeated runs cheaper and faster.
 - Some stages require authenticated third-party APIs, so full end-to-end execution depends on valid credentials.
+- Gemini API transport and shared batch helpers live in `src/ingest/gemini.py`; task-specific Gemini logic lives in `src/ingest/gemini_summaries.py` and `src/ingest/gemini_author_details.py`.
 
 ## Future Directions
 
 Potential next steps for the project include:
 
-- richer temporal analysis across bestseller periods
-- deeper author-level and demographic exploration
-- topic clustering or embedding-based comparisons across titles
-- dashboarding layers for interactive exploration
-- stronger validation and automated test coverage
+- Address the `missing batch text` error in `gemini_author_details` with a two-step approach: use a Custom Search API directly for grounding data, then pass that gathered text into Gemini.
+- Update logging so long-running ingestion, batch polling, export counts, and recoverable failures are easier to inspect.
+- Add unit tests for parsing, normalization, repository upserts, export shaping, and Gemini batch result handling.
+- Add richer temporal analysis across bestseller periods.
+- Explore topic clustering or embedding-based comparisons across titles.
+- Build dashboarding layers for interactive exploration.
 
 ## Closing Thought
 
