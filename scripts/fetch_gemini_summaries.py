@@ -2,16 +2,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import settings
 from src.ingest.gemini import (
     TERMINAL_BATCH_STATES,
     GeminiClient,
     GeminiConfig,
+)
+from src.ingest.gemini_summaries import (
+    build_batch_request_line,
     parse_batch_result_line,
 )
 from src.ingest.repo import GeminiContentSummaryRow, Repo
@@ -221,7 +229,13 @@ def write_jsonl_input(jsonl_path: Path, gemini: GeminiClient, summary_inputs: li
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     with jsonl_path.open("w", encoding="utf-8") as fh:
         for row in summary_inputs:
-            fh.write(json.dumps(gemini.build_batch_request_line(row), ensure_ascii=False) + "\n")
+            fh.write(
+                json.dumps(
+                    build_batch_request_line(row, temperature=gemini.cfg.temperature),
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
 
 def import_result_jsonl(result_path: Path) -> None:
