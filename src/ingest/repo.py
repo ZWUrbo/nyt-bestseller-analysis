@@ -18,7 +18,18 @@ CREATE TABLE IF NOT EXISTS nyt_entries (
     isbn13 TEXT,
     description TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    nyt_author_id INTEGER,
+    FOREIGN KEY (nyt_author_id) REFERENCES nyt_authors(id),
     UNIQUE(list_name, published_date, title, author)
+);
+
+CREATE TABLE IF NOT EXISTS nyt_authors (
+    id INTEGER PRIMARY KEY,
+    author_name TEXT NOT NULL UNIQUE,
+    representative_book TEXT,
+    hardcover_author_id INTEGER,
+    last_checked_at TEXT NOT NULL,
+    FOREIGN KEY (hardcover_author_id) REFERENCES hardcover_authors(author_id)
 );
 
 CREATE TABLE IF NOT EXISTS openlibrary_enrichment (
@@ -68,10 +79,26 @@ CREATE TABLE IF NOT EXISTS gemini_content_summaries (
     last_checked_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS gemini_author_details (
+    id INTEGER PRIMARY KEY,
+    nyt_author_id INTEGER NOT NULL UNIQUE,
+    birth_year INTEGER,
+    nationality TEXT,
+    ethnicity TEXT,
+    gender INTEGER,
+    is_bipoc INTEGER,
+    is_lgbtq INTEGER,
+    raw_response TEXT,
+    last_error TEXT,
+    last_checked_at TEXT NOT NULL,
+    FOREIGN KEY (nyt_author_id) REFERENCES nyt_authors(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_nyt_isbn13 ON nyt_entries(isbn13);
 CREATE INDEX IF NOT EXISTS idx_openlibrary_enrimchment_isbn13 ON openlibrary_enrichment(isbn13);
 CREATE INDEX IF NOT EXISTS idx_hardcover_enrichment_isbn13 ON hardcover_enrichment(isbn13);
 CREATE INDEX IF NOT EXISTS idx_hardcover_enrichment_author_id ON hardcover_enrichment(author_id);
+CREATE INDEX IF NOT EXISTS idx_nyt_authors_hardcover_author_id ON nyt_authors(hardcover_author_id);
 """
 
 @dataclass (frozen=True)
@@ -138,6 +165,26 @@ class GeminiContentSummaryRow:
     raw_response: Optional[str]
     last_error: Optional[str]
 
+
+@dataclass(frozen=True)
+class GeminiAuthorDetailsInputRow:
+    nyt_author_id: int
+    author: str
+    book: str
+
+
+@dataclass(frozen=True)
+class GeminiAuthorDetailsRow:
+    nyt_author_id: int
+    birth_year: Optional[int]
+    nationality: Optional[str]
+    ethnicity: Optional[str]
+    gender: Optional[int]
+    is_bipoc: Optional[bool]
+    is_lgbtq: Optional[bool]
+    raw_response: Optional[str]
+    last_error: Optional[str]
+
 class Repo:
     def __init__(self, conn: sqlite3.Connection) -> None:
          self.conn = conn
@@ -145,6 +192,9 @@ class Repo:
     def init_schema(self) -> None:
         self.conn.executescript(SCHEMA_SQL)
         self._ensure_column("hardcover_enrichment", "author_id", "INTEGER")
+        self._ensure_column("nyt_entries", "nyt_author_id", "INTEGER")
+        self.refresh_nyt_authors()
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_nyt_entries_author_id ON nyt_entries(nyt_author_id)")
         self.conn.commit()
     
     def upsert_nyt_entries(self, entries: Iterable[NytEntry]) -> int:
@@ -253,6 +303,38 @@ class Repo:
                     isbn13=row[0],
                     title=row[1],
                     author=row[2],
+                )
+            )
+        return rows
+
+    def list_gemini_author_details_inputs(
+        self,
+        limit: Optional[int] = 1000,
+        missing_only: bool = True,
+    ) -> list[GeminiAuthorDetailsInputRow]:
+        sql = """
+        SELECT
+            a.id,
+            a.author_name,
+            a.representative_book
+        FROM nyt_authors a
+        LEFT JOIN gemini_author_details g
+            ON g.nyt_author_id = a.id
+        WHERE (? = 0 OR g.nyt_author_id IS NULL OR g.last_error IS NOT NULL)
+        ORDER BY a.author_name
+        """
+        query_params: list[object] = [1 if missing_only else 0]
+        if limit is not None:
+            sql += "\nLIMIT ?"
+            query_params.append(limit)
+
+        rows: list[GeminiAuthorDetailsInputRow] = []
+        for row in self.conn.execute(sql, tuple(query_params)).fetchall():
+            rows.append(
+                GeminiAuthorDetailsInputRow(
+                    nyt_author_id=row[0],
+                    author=row[1],
+                    book=row[2],
                 )
             )
         return rows
@@ -423,15 +505,128 @@ class Repo:
         self.conn.commit()
         return count
 
+    def upsert_gemini_author_details(
+        self,
+        rows: Iterable[GeminiAuthorDetailsRow],
+    ) -> int:
+        sql = """
+        INSERT INTO gemini_author_details
+        (nyt_author_id, birth_year, nationality, ethnicity, gender, is_bipoc, is_lgbtq, raw_response, last_error, last_checked_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(nyt_author_id) DO UPDATE SET
+            birth_year=COALESCE(excluded.birth_year, gemini_author_details.birth_year),
+            nationality=COALESCE(excluded.nationality, gemini_author_details.nationality),
+            ethnicity=COALESCE(excluded.ethnicity, gemini_author_details.ethnicity),
+            gender=COALESCE(excluded.gender, gemini_author_details.gender),
+            is_bipoc=COALESCE(excluded.is_bipoc, gemini_author_details.is_bipoc),
+            is_lgbtq=COALESCE(excluded.is_lgbtq, gemini_author_details.is_lgbtq),
+            raw_response=COALESCE(excluded.raw_response, gemini_author_details.raw_response),
+            last_error=excluded.last_error,
+            last_checked_at=excluded.last_checked_at
+        """
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        cur = self.conn.cursor()
+        count = 0
+        for r in rows:
+            cur.execute(
+                sql,
+                (
+                    r.nyt_author_id,
+                    r.birth_year,
+                    r.nationality,
+                    r.ethnicity,
+                    r.gender,
+                    _bool_to_int(r.is_bipoc),
+                    _bool_to_int(r.is_lgbtq),
+                    r.raw_response,
+                    r.last_error,
+                    now,
+                ),
+            )
+            count += 1
+        self.conn.commit()
+        return count
+
+    def refresh_nyt_authors(self) -> None:
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self.conn.execute(
+            """
+            INSERT INTO nyt_authors
+            (author_name, representative_book, hardcover_author_id, last_checked_at)
+            WITH ranked_books AS (
+                SELECT
+                    TRIM(n.author) AS author_name,
+                    NULLIF(TRIM(n.title), '') AS representative_book,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY TRIM(n.author)
+                        ORDER BY
+                            COALESCE(n.weeks_on_list, 0) DESC,
+                            n.published_date DESC,
+                            COALESCE(n.rank, 9999) ASC,
+                            n.title ASC
+                    ) AS row_num
+                FROM nyt_entries n
+                WHERE n.author IS NOT NULL
+                  AND TRIM(n.author) <> ''
+                  AND n.title IS NOT NULL
+                  AND TRIM(n.title) <> ''
+            ),
+            hardcover_author_ids AS (
+                SELECT
+                    TRIM(n.author) AS author_name,
+                    CASE
+                        WHEN COUNT(DISTINCT h.author_id) = 1 THEN MIN(h.author_id)
+                        ELSE NULL
+                    END AS hardcover_author_id
+                FROM nyt_entries n
+                LEFT JOIN hardcover_enrichment h
+                    ON h.isbn13 = n.isbn13
+                   AND h.author_id IS NOT NULL
+                WHERE n.author IS NOT NULL
+                  AND TRIM(n.author) <> ''
+                GROUP BY TRIM(n.author)
+            )
+            SELECT
+                b.author_name,
+                b.representative_book,
+                h.hardcover_author_id,
+                ?
+            FROM ranked_books b
+            LEFT JOIN hardcover_author_ids h
+                ON h.author_name = b.author_name
+            WHERE b.row_num = 1
+            ON CONFLICT(author_name) DO UPDATE SET
+                representative_book=COALESCE(excluded.representative_book, nyt_authors.representative_book),
+                hardcover_author_id=excluded.hardcover_author_id,
+                last_checked_at=excluded.last_checked_at
+            """,
+            (now,),
+        )
+        self.conn.execute(
+            """
+            UPDATE nyt_entries
+            SET nyt_author_id = (
+                SELECT a.id
+                FROM nyt_authors a
+                WHERE a.author_name = TRIM(nyt_entries.author)
+            )
+            WHERE author IS NOT NULL
+              AND TRIM(author) <> ''
+            """
+        )
+
     def _ensure_column(self, table_name: str, column_name: str, column_type: str) -> None:
-        existing_columns = {
-            row[1]
-            for row in self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-        }
+        existing_columns = self._table_columns(table_name)
         if column_name not in existing_columns:
             self.conn.execute(
                 f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
             )
+
+    def _table_columns(self, table_name: str) -> set[str]:
+        return {
+            row[1]
+            for row in self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
 
 
 def _bool_to_int(value: Optional[bool]) -> Optional[int]:

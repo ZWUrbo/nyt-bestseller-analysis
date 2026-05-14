@@ -59,6 +59,11 @@ def parse_args() -> argparse.Namespace:
         help="Skip Gemini content summary enrichment step.",
     )
     p.add_argument(
+        "--skip-gemini-author-details",
+        action="store_true",
+        help="Skip Gemini author details enrichment step.",
+    )
+    p.add_argument(
         "--skip-exports",
         action="store_true",
         help="Skip final CSV export steps.",
@@ -104,6 +109,11 @@ def main() -> None:
     if args.refresh_all:
         gemini_cmd.append("--refresh-all")
 
+    gemini_author_details_cmd = [sys.executable, "scripts/fetch_gemini_author_details.py"]
+    gemini_author_details_cmd.extend(["--limit", str(args.limit)])
+    if args.refresh_all:
+        gemini_author_details_cmd.append("--refresh-all")
+
     export_cmds = [
         ([sys.executable, "scripts/export_tables.py"], "table exports"),
         ([sys.executable, "scripts/export_gemini_content_tags.py"], "Gemini content tag exports"),
@@ -121,6 +131,8 @@ def main() -> None:
             run_step(hardcover_authors_cmd, project_root, "Hardcover author enrichment")
         if not args.skip_gemini:
             run_step(gemini_cmd, project_root, "Gemini content summary enrichment")
+        if not args.skip_gemini_author_details:
+            run_step(gemini_author_details_cmd, project_root, "Gemini author details enrichment")
         if not args.skip_exports:
             for export_cmd, step_name in export_cmds:
                 run_step(export_cmd, project_root, step_name)

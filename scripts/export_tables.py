@@ -10,14 +10,17 @@ from typing import Any
 import pandas as pd
 
 from src.config import settings
+from src.ingest.repo import Repo
 from src.utils.io import connect_sqlite
 
 TABLE_NAMES = (
     "nyt_entries",
+    "nyt_authors",
     "openlibrary_enrichment",
     "hardcover_enrichment",
     "hardcover_authors",
     "gemini_content_summaries",
+    "gemini_author_details",
 )
 HARDCOVER_CATEGORY_COLUMNS = {
     "Content Warning": "content_warning",
@@ -134,6 +137,47 @@ def make_gemini_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return export_frame
 
 
+def make_gemini_author_details_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    export_frame = frame.copy()
+
+    for column in text_columns(export_frame):
+        export_frame[column] = export_frame[column].map(normalize_text)
+
+    for column in ("id", "nyt_author_id", "hardcover_author_id", "gender"):
+        if column in export_frame.columns:
+            export_frame[column] = export_frame[column].astype("Int64")
+
+    for column in ("is_bipoc", "is_lgbtq"):
+        if column in export_frame.columns:
+            export_frame[column] = export_frame[column].map(
+                lambda value: None if pd.isna(value) else bool(int(value))
+            )
+
+    if "gender" in export_frame.columns:
+        export_frame["gender_label"] = export_frame["gender"].map(
+            {
+                1: "Male",
+                2: "Female",
+                3: "Non-Binary",
+            }
+        )
+
+    return export_frame
+
+
+def make_nyt_author_export_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    export_frame = frame.copy()
+
+    for column in text_columns(export_frame):
+        export_frame[column] = export_frame[column].map(normalize_text)
+
+    for column in ("id", "hardcover_author_id"):
+        if column in export_frame.columns:
+            export_frame[column] = export_frame[column].astype("Int64")
+
+    return export_frame
+
+
 def text_columns(frame: pd.DataFrame) -> list[str]:
     return [
         column
@@ -146,16 +190,47 @@ def text_columns(frame: pd.DataFrame) -> list[str]:
 def export_table(db_path: Path, output_dir: Path, table_name: str) -> tuple[Path, int, int]:
     conn = connect_sqlite(db_path)
     try:
-        frame = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+        Repo(conn).init_schema()
+        if table_name == "gemini_author_details":
+            frame = pd.read_sql_query(
+                """
+                SELECT
+                    g.id,
+                    g.nyt_author_id,
+                    a.author_name,
+                    a.representative_book,
+                    a.hardcover_author_id,
+                    g.birth_year,
+                    g.nationality,
+                    g.ethnicity,
+                    g.gender,
+                    g.is_bipoc,
+                    g.is_lgbtq,
+                    g.raw_response,
+                    g.last_error,
+                    g.last_checked_at
+                FROM gemini_author_details g
+                LEFT JOIN nyt_authors a
+                    ON a.id = g.nyt_author_id
+                ORDER BY a.author_name, g.nyt_author_id
+                """,
+                conn,
+            )
+        else:
+            frame = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
     finally:
         conn.close()
 
-    if table_name == "hardcover_enrichment":
+    if table_name == "nyt_authors":
+        frame = make_nyt_author_export_frame(frame)
+    elif table_name == "hardcover_enrichment":
         frame = make_hardcover_export_frame(frame)
     elif table_name == "hardcover_authors":
         frame = make_hardcover_author_export_frame(frame)
     elif table_name == "gemini_content_summaries":
         frame = make_gemini_export_frame(frame)
+    elif table_name == "gemini_author_details":
+        frame = make_gemini_author_details_export_frame(frame)
 
     output_path = output_dir / f"{table_name}.csv"
     frame.to_csv(

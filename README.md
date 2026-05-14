@@ -17,6 +17,7 @@ Using the New York Times bestseller lists as a proxy for widely consumed books, 
 - Adds Hardcover metadata such as ratings, readership signals, and tag groupings
 - Enriches author records with additional Hardcover profile fields
 - Generates AI-assisted summaries and seed content tags using Gemini
+- Extracts high-confidence author detail fields using Gemini
 - Exports clean CSV datasets for notebooks, SQL, BI tools, and Tableau-style analysis
 
 ## Why It’s Useful
@@ -60,6 +61,8 @@ Pipeline stages:
    Enriches related authors with additional author-level data.
 5. `scripts/fetch_gemini_summaries.py`
    Generates AI-assisted summaries and seed content tags.
+6. `scripts/fetch_gemini_author_details.py`
+   Extracts structured author detail fields.
 
 After ingestion, the project provides export scripts for flat analytical outputs:
 
@@ -77,14 +80,17 @@ Key outputs include:
 - Keyword feature files in `data/processed/features/`
 - Tableau-friendly long-format keyword and content-tag files
 - Exported Gemini summary datasets for downstream text analysis
+- Exported Gemini author detail datasets for Tableau-style author analysis
 
 Primary database tables:
 
 - `nyt_entries`
+- `nyt_authors`
 - `openlibrary_enrichment`
 - `hardcover_enrichment`
 - `hardcover_authors`
 - `gemini_content_summaries`
+- `gemini_author_details`
 
 ## Repository Structure
 
@@ -196,6 +202,7 @@ python scripts/run_pipeline.py --refresh-all
 python scripts/run_pipeline.py --skip-gemini
 python scripts/run_pipeline.py --skip-openlibrary --skip-hardcover
 python scripts/run_pipeline.py --skip-hardcover-authors
+python scripts/run_pipeline.py --skip-gemini-author-details
 ```
 
 ### Export analytical datasets
