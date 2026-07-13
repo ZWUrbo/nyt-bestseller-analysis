@@ -4,6 +4,10 @@ A reproducible Python data pipeline for collecting, enriching, and exporting New
 
 This project uses the New York Times bestseller lists as a starting point, then enriches each title with metadata from Open Library and Hardcover, plus AI-assisted summaries, content tags, and author detail fields from Gemini. The result is a local SQLite database and a set of analysis-ready CSV outputs that make it easier to study the subjects, themes, signals, authorship, and patterns present in widely read books.
 
+## Dashboard
+
+View the published Tableau Public dashboard: [NYT Analysis](https://public.tableau.com/app/profile/zac.urbiztondo/viz/FinalNYTAnalysis/NYTAnalysis?publish=yes&showOnboarding=true)
+
 ## Project Motivation
 
 I started this project because of my curiosity about people and my love of reading. I wanted to better understand the subjects, themes, and ideas people are consuming through books because I believe books, as a form of media, meaningfully shape how we see the world.
